@@ -1,0 +1,50 @@
+Starting verification process for upload\live_test2.csv
+Found 48 unique domains to check
+PROGRESS|pass=HEAD|current=0|total=48|percent=0|stage=HEAD scan
+PROGRESS|pass=GET|current=2|total=4|percent=50|stage=GET scan (run 1/1)
+PROGRESS|pass=GET|current=3|total=4|percent=75|stage=GET scan (run 1/1)
+PROGRESS|pass=GET|current=4|total=4|percent=100|stage=GET scan (run 1/1)
+
+--- Verification Complete ---
+Total unique websites checked: 48
+Reachable websites: 45
+Unreachable websites: 3
+Successfully saved 45 rows to 'reachable\live_test2_reachable.csv'
+Successfully saved full report for 48 unique URLs to 'all\live_test2_report_all.csv'
+PROGRESS|pass=HEAD|current=2|total=48|percent=4|stage=HEAD scan
+PROGRESS|pass=HEAD|current=4|total=48|percent=8|stage=HEAD scan
+PROGRESS|pass=HEAD|current=6|total=48|percent=12|stage=HEAD scan
+PROGRESS|pass=HEAD|current=8|total=48|percent=16|stage=HEAD scan
+PROGRESS|pass=HEAD|current=10|total=48|percent=20|stage=HEAD scan
+PROGRESS|pass=HEAD|current=12|total=48|percent=25|stage=HEAD scan
+PROGRESS|pass=HEAD|current=14|total=48|percent=29|stage=HEAD scan
+PROGRESS|pass=HEAD|current=16|total=48|percent=33|stage=HEAD scan
+PROGRESS|pass=HEAD|current=18|total=48|percent=37|stage=HEAD scan
+PROGRESS|pass=HEAD|current=20|total=48|percent=41|stage=HEAD scan
+PROGRESS|pass=HEAD|current=22|total=48|percent=45|stage=HEAD scan
+PROGRESS|pass=HEAD|current=24|total=48|percent=50|stage=HEAD scan
+PROGRESS|pass=HEAD|current=26|total=48|percent=54|stage=HEAD scan
+PROGRESS|pass=HEAD|current=28|total=48|percent=58|stage=HEAD scan
+PROGRESS|pass=HEAD|current=30|total=48|percent=62|stage=HEAD scan
+PROGRESS|pass=HEAD|current=32|total=48|percent=66|stage=HEAD scan
+PROGRESS|pass=HEAD|current=34|total=48|percent=70|stage=HEAD scan
+PROGRESS|pass=HEAD|current=36|total=48|percent=75|stage=HEAD scan
+PROGRESS|pass=HEAD|current=38|total=48|percent=79|stage=HEAD scan
+PROGRESS|pass=HEAD|current=40|total=48|percent=83|stage=HEAD scan
+PROGRESS|pass=HEAD|current=42|total=48|percent=87|stage=HEAD scan
+PROGRESS|pass=HEAD|current=44|total=48|percent=91|stage=HEAD scan
+PROGRESS|pass=HEAD|current=46|total=48|percent=95|stage=HEAD scan
+PROGRESS|pass=HEAD|current=48|total=48|percent=100|stage=HEAD scan
+
+Verifying... (Pass 2: GET) - 4 domains
+PROGRESS|pass=GET|current=1|total=4|percent=25|stage=GET scan (run 1/1)
+PROGRESS|pass=GET|current=2|total=4|percent=50|stage=GET scan (run 1/1)
+PROGRESS|pass=GET|current=3|total=4|percent=75|stage=GET scan (run 1/1)
+PROGRESS|pass=GET|current=4|total=4|percent=100|stage=GET scan (run 1/1)
+
+--- Verification Complete ---
+Total unique websites checked: 48
+Reachable websites: 45
+Unreachable websites: 3
+Successfully saved 45 rows to 'reachable\live_test2_reachable.csv'
+Successfully saved full report for 48 unique URLs to 'all\live_test2_report_all.csv'

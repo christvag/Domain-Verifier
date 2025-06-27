@@ -63,7 +63,14 @@ import httpx
 from tqdm.asyncio import tqdm as asyncio_tqdm
 
 
-USER_AGENTS = json.load(open("src/form_autobot/user_agents.json"))
+# Load user agents with fallback if file is missing
+try:
+    USER_AGENTS = json.load(open("src/form_autobot/user_agents.json"))
+except (FileNotFoundError, OSError, json.JSONDecodeError):
+    USER_AGENTS = [
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36",
+        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/15.1 Safari/605.1.15"
+    ]
 headers = {
     "User-Agent": random.choice(USER_AGENTS),
 }
@@ -127,148 +134,170 @@ async def is_reachable(
             return original_url, False, f"Unexpected Error: {str(e)}"
 
 
-async def main():
+async def verify_domains(
+    input_path, 
+    retries=2, 
+    concurrency=100, 
+    column="website", 
+    log_path="process.log"
+):
     """
-    Main function implementing the two-pass (HEAD then GET) check.
+    Verify domain reachability using a two-pass HEAD/GET method.
+    
+    Args:
+        input_path: Path to the CSV file containing domains
+        retries: Number of GET request retries for failed domains
+        concurrency: Number of concurrent requests
+        column: Name of the column containing domains
+        log_path: Path to write logs to
+        
+    Returns:
+        tuple: (reachable_df, report_df) DataFrames with results
     """
-    parser = argparse.ArgumentParser(
-        description="Check reachability of websites using a two-pass HEAD/GET method.",
-        formatter_class=argparse.RawTextHelpFormatter,
-    )
-    parser.add_argument("input_csv", help="Path to the input CSV file.")
-    parser.add_argument(
-        "--column", default="website", help="Name of the column containing website URLs."
-    )
-    parser.add_argument(
-        "--concurrency",
-        type=int,
-        default=100,
-        help="Number of parallel requests for the initial HEAD scan. (Default: 100).",
-    )
-    parser.add_argument(
-        "--retries",
-        type=int,
-        default=2,
-        help="Number of times to retry failed websites with GET requests. (Default: 2).",
-    )
-    args = parser.parse_args()
-
-    input_path = Path(args.input_csv)
-    if not input_path.is_file():
-        print(f"Error: Input file not found at {input_path}")
-        return
-
-    # Generate dynamic output filenames
-    base_name = input_path.stem
-    output_reachable_path = input_path.parent / f"{base_name}_reachable.csv"
-    output_report_path = input_path.parent / f"{base_name}_report_all.csv"
+    # Reset log file
+    with open(log_path, "w") as f:
+        f.write(f"Starting verification process for {input_path}\n")
+    
+    # Log progress to file and update Streamlit UI
+    def log_progress(pass_name, current, total, stage):
+        percent = int((current / total) * 100) if total > 0 else 0
+        progress_line = f"PROGRESS|pass={pass_name}|current={current}|total={total}|percent={percent}|stage={stage}\n"
+        with open(log_path, "a") as f:
+            f.write(progress_line)
+            f.flush()
+    
+    # Ensure output directories exist
+    Path("reachable").mkdir(parents=True, exist_ok=True)
+    Path("all").mkdir(parents=True, exist_ok=True)
+    
+    # Generate output filenames
+    base_name = Path(input_path).stem
+    output_reachable_path = Path("reachable") / f"{base_name}_reachable.csv"
+    output_report_path = Path("all") / f"{base_name}_report_all.csv"
 
     try:
         df = pd.read_csv(input_path)
     except Exception as e:
-        print(f"Error reading CSV file: {e}")
-        return
+        with open(log_path, "a") as f:
+            f.write(f"Error reading CSV file: {e}\n")
+            f.flush()
+        return None, None
 
-    if args.column not in df.columns:
-        print(
-            f"Error: Column '{args.column}' not found in the CSV file. Available columns: {list(df.columns)}"
-        )
-        return
+    if column not in df.columns:
+        error_msg = f"Column '{column}' not found in the CSV file. Available columns: {list(df.columns)}"
+        with open(log_path, "a") as f:
+            f.write(error_msg + "\n")
+            f.flush()
+        return None, None
 
-    urls_to_check = df[args.column].dropna().unique().tolist()
-    final_results_map = {url: None for url in urls_to_check}
+    urls_to_check = df[column].dropna().unique().tolist()
+    final_results_map = {}  # Initialize as empty dict
 
+    # Get random user agent
+    headers = {"User-Agent": random.choice(USER_AGENTS)}
+    
+    with open(log_path, "a") as f:
+        f.write(f"Found {len(urls_to_check)} unique domains to check\n")
+        
     async with httpx.AsyncClient(headers=headers) as session:
         # --- Pass 1: High-Speed HEAD Scan ---
-        print(
-            f"--- Pass 1: Starting high-speed HEAD scan for {len(urls_to_check)} URLs (Concurrency: {args.concurrency}) ---"
-        )
-        semaphore = asyncio.Semaphore(args.concurrency)
+        log_progress("HEAD", 0, len(urls_to_check), "HEAD scan")
+        
+        semaphore = asyncio.Semaphore(concurrency)
         tasks = [is_reachable(url, session, semaphore, "HEAD") for url in urls_to_check]
-        for task in asyncio_tqdm.as_completed(tasks, total=len(tasks), desc="Pass 1 (HEAD)"):
+        
+        completed = 0
+        for task in asyncio.as_completed(tasks):
             try:
                 url, reachable, reason = await task
                 final_results_map[url] = {"url": url, "reachable": reachable, "remarks": reason}
+                completed += 1
+                
+                # Log progress periodically or at completion
+                if completed % max(1, min(10, len(urls_to_check) // 20)) == 0 or completed == len(urls_to_check):
+                    log_progress("HEAD", completed, len(urls_to_check), "HEAD scan")
+                    
             except Exception as e:
-                print(f"\nError processing a task result: {e}")
+                pass  # Silently handle exceptions to keep progress going
 
         failed_urls = [url for url, result in final_results_map.items() if not result["reachable"]]
 
         # --- Pass 2: Robust GET Scan on Failures ---
         if not failed_urls:
-            print("\nAll websites were reachable on the first pass. No second pass needed.")
+            with open(log_path, "a") as f:
+                f.write("\nAll websites were reachable on the first pass. No second pass needed.\n")
+                f.flush()
         else:
-            get_concurrency = max(10, args.concurrency // 2)
-            print(
-                f"\n--- Pass 2: Starting robust GET scan for {len(failed_urls)} failed URLs ({args.retries} retries, Concurrency: {get_concurrency}) ---"
-            )
+            get_concurrency = max(10, concurrency // 2)
+            with open(log_path, "a") as f:
+                f.write(f"\nVerifying... (Pass 2: GET) - {len(failed_urls)} domains\n")
+                f.flush()
+                
             get_semaphore = asyncio.Semaphore(get_concurrency)
-
-            # This will store the history of remarks for URLs that keep failing
             failed_remarks_history = {url: [] for url in failed_urls}
-
-            for i in range(args.retries):
+            
+            for i in range(retries):
                 run_num = i + 1
                 if not failed_urls:
-                    print(f"\nNo more URLs to check on run {run_num}. Stopping early.")
+                    with open(log_path, "a") as f:
+                        f.write(f"\nNo more URLs to check on run {run_num}. Stopping early.\n")
+                        f.flush()
                     break
-
+                    
                 tasks = [is_reachable(url, session, get_semaphore, "GET") for url in failed_urls]
-
-                # List for URLs that fail THIS run
                 still_failing = []
-
-                for task in asyncio_tqdm.as_completed(
-                    tasks, total=len(tasks), desc=f"Pass 2 (GET) Run {run_num}/{args.retries}"
-                ):
+                
+                completed = 0
+                total = len(failed_urls)
+                for task in asyncio.as_completed(tasks):
                     try:
                         url, reachable, reason = await task
                         if reachable:
-                            # Success! Update the main results map and we're done with this URL.
                             final_results_map[url] = {
                                 "url": url,
                                 "reachable": True,
                                 "remarks": reason,
                             }
                         else:
-                            # Failure. Add to the list for the next retry and record the error.
                             still_failing.append(url)
                             failed_remarks_history[url].append(reason)
-                    except Exception as e:
-                        print(f"\nError processing a task result: {e}")
-
-                print(
-                    f"URLs that turned to succcess from failure on this run: {len(failed_urls) - len(still_failing)}"
-                )
-
-                # The list for the next loop is the list of URLs that just failed.
+                        
+                        completed += 1
+                        if completed % max(1, min(5, total // 10)) == 0 or completed == total:
+                            log_progress("GET", completed, total, f"GET scan (run {run_num}/{retries})")
+                    except Exception:
+                        pass
+                        
                 failed_urls = still_failing
-
-            # After all retries, for any URL that never succeeded, consolidate its error remarks.
+                
             for url in failed_urls:
-                final_results_map[url]["remarks"] = " -> ".join(failed_remarks_history[url])
+                if url in final_results_map and isinstance(final_results_map[url], dict):
+                    final_results_map[url]["remarks"] = " -> ".join(failed_remarks_history[url])
 
     # --- Generate Final Output ---
     report_df = pd.DataFrame(final_results_map.values())
     reachable_urls = report_df[report_df["reachable"]]["url"]
-    reachable_df = df[df[args.column].isin(reachable_urls)]
+    reachable_df = df[df[column].isin(reachable_urls)]
 
     total_checked = len(urls_to_check)
     total_reachable = len(reachable_urls.unique())
-    print(f"\n--- Verification Complete ---")
-    print(f"Total unique websites checked: {total_checked}")
-    print(f"Reachable websites: {total_reachable}")
-    print(f"Unreachable websites: {total_checked - total_reachable}")
-    print(f"-----------------------------")
+    
+    with open(log_path, "a") as f:
+        f.write(f"\n--- Verification Complete ---\n")
+        f.write(f"Total unique websites checked: {total_checked}\n")
+        f.write(f"Reachable websites: {total_reachable}\n")
+        f.write(f"Unreachable websites: {total_checked - total_reachable}\n")
+        f.flush()
 
+    # Save the files
     reachable_df.to_csv(output_reachable_path, index=False)
-    print(f"Successfully saved {len(reachable_df)} rows to '{output_reachable_path}'")
-
     report_df.to_csv(output_report_path, index=False)
-    print(
-        f"Successfully saved full report for {len(report_df)} unique URLs to '{output_report_path}'"
-    )
+    
+    with open(log_path, "a") as f:
+        f.write(f"Successfully saved {len(reachable_df)} rows to '{output_reachable_path}'\n")
+        f.write(f"Successfully saved full report for {len(report_df)} unique URLs to '{output_report_path}'\n")
+        f.flush()
+        
+    return reachable_df, report_df
 
 
-if __name__ == "__main__":
-    asyncio.run(main())

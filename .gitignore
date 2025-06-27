@@ -1,5 +1,15 @@
-*.log
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# SQLite database
 *.db
-all/*
-reachable/*
-upload/*
+*.sqlite
+*.sqlite3
+
+# Output directories
+all/
+reachable/
+upload/
+process.log

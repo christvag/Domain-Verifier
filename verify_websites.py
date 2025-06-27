@@ -56,11 +56,14 @@ import asyncio
 import json
 from pathlib import Path
 import random
+import time
 
 import pandas as pd
 import numpy as np
 import httpx
 from tqdm.asyncio import tqdm as asyncio_tqdm
+
+from database_manager import save_run_to_db
 
 
 # Load user agents with fallback if file is missing
@@ -135,7 +138,12 @@ async def is_reachable(
 
 
 async def verify_domains(
-    input_path, retries=2, concurrency=100, column="website", log_path="process.log"
+    input_path,
+    start_time,
+    retries=2,
+    concurrency=100,
+    column="website",
+    log_path="process.log",
 ):
     """
     Verify domain reachability using a two-pass HEAD/GET method.
@@ -306,24 +314,27 @@ async def verify_domains(
     total_checked = len(urls_to_check)
     total_reachable = len(reachable_urls.unique())
 
+    # Save the files
+    reachable_df.to_csv(output_reachable_path, index=False)
+    report_df.to_csv(output_report_path, index=False)
+
+    # --- Save to Database ---
+    end_time = time.time()
+    processing_time = end_time - start_time
+    save_run_to_db(
+        filename=Path(input_path).name,
+        processing_time=processing_time,
+        reachable_count=total_reachable,
+        unreachable_count=(total_checked - total_reachable),
+        reachable_filepath=output_reachable_path,
+        report_filepath=output_report_path,
+    )
+
     with open(log_path, "a") as f:
         f.write(f"\n--- Verification Complete ---\n")
         f.write(f"Total unique websites checked: {total_checked}\n")
         f.write(f"Reachable websites: {total_reachable}\n")
         f.write(f"Unreachable websites: {total_checked - total_reachable}\n")
-        f.flush()
-
-    # Save the files
-    reachable_df.to_csv(output_reachable_path, index=False)
-    report_df.to_csv(output_report_path, index=False)
-
-    with open(log_path, "a") as f:
-        f.write(
-            f"Successfully saved {len(reachable_df)} rows to '{output_reachable_path}'\n"
-        )
-        f.write(
-            f"Successfully saved full report for {len(report_df)} unique URLs to '{output_report_path}'\n"
-        )
         f.flush()
 
     return reachable_df, report_df

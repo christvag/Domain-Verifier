@@ -6,10 +6,16 @@ import pandas as pd
 import re
 import asyncio
 import threading
+from pathlib import Path
+
+from database_manager import initialize_db, fetch_past_runs
 
 # --- Page and State Setup ---
 st.set_page_config(page_title="Domain Verifier", layout="centered")
 st.title("Domain Verifier")
+
+# --- DB Initialization ---
+initialize_db()
 
 # --- Session State Initialization ---
 for key in [
@@ -79,9 +85,11 @@ def run_verification_in_thread(file_path, retries, column_name):
             asyncio.set_event_loop(loop)
             from verify_websites import verify_domains
 
+            start_time = time.time()
             reachable_df, _ = loop.run_until_complete(
                 verify_domains(
                     file_path,
+                    start_time=start_time,
                     retries=retries,
                     column=column_name,
                     log_path=LOG_FILE_PATH,
@@ -190,3 +198,55 @@ else:
     # Initial state
     st.markdown("---")
     st.info("Start a process to see live updates.")
+
+
+# --- Display Past Runs ---
+@st.fragment
+def show_past_runs():
+    """Displays a table of past runs with a manual refresh button."""
+    st.markdown("---")
+    st.subheader("Past Runs")
+    st.button("🔄 Refresh History")
+
+    past_runs = fetch_past_runs()
+
+    if not past_runs:
+        st.info("No past runs found. Complete a verification to see history here.")
+    else:
+        cols = st.columns((2, 1, 1, 1, 1, 1))
+        headers = [
+            "File Processed",
+            "Processing Time",
+            "Reachable",
+            "Unreachable",
+            "Reachable File",
+            "Full Report",
+        ]
+        for col, header in zip(cols, headers):
+            col.write(f"**{header}**")
+
+        for run in past_runs:
+            cols = st.columns((2, 1, 1, 1, 1, 1))
+            cols[0].write(run["filename"])
+            cols[1].write(f"{run['processing_time']:.2f}s")
+            cols[2].write(f"✔️ {run['reachable_count']}")
+            cols[3].write(f"❌ {run['unreachable_count']}")
+
+            with open(run["reachable_filepath"], "rb") as f:
+                cols[4].download_button(
+                    "⬇️",
+                    f.read(),
+                    file_name=Path(run["reachable_filepath"]).name,
+                    key=f"reachable_{run['id']}",
+                )
+
+            with open(run["report_filepath"], "rb") as f:
+                cols[5].download_button(
+                    "⬇️",
+                    f.read(),
+                    file_name=Path(run["report_filepath"]).name,
+                    key=f"report_{run['id']}",
+                )
+
+
+show_past_runs()

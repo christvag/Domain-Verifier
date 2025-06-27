@@ -102,39 +102,37 @@ PROGRESS|pass=HEAD|current=970|total=990|percent=97|stage=HEAD scan
 PROGRESS|pass=HEAD|current=980|total=990|percent=98|stage=HEAD scan
 PROGRESS|pass=HEAD|current=990|total=990|percent=100|stage=HEAD scan
 
-Verifying... (Pass 2: GET) - 139 domains
-PROGRESS|pass=GET|current=5|total=139|percent=3|stage=GET scan (run 1/1)
-PROGRESS|pass=GET|current=10|total=139|percent=7|stage=GET scan (run 1/1)
-PROGRESS|pass=GET|current=15|total=139|percent=10|stage=GET scan (run 1/1)
-PROGRESS|pass=GET|current=20|total=139|percent=14|stage=GET scan (run 1/1)
-PROGRESS|pass=GET|current=25|total=139|percent=17|stage=GET scan (run 1/1)
-PROGRESS|pass=GET|current=30|total=139|percent=21|stage=GET scan (run 1/1)
-PROGRESS|pass=GET|current=35|total=139|percent=25|stage=GET scan (run 1/1)
-PROGRESS|pass=GET|current=40|total=139|percent=28|stage=GET scan (run 1/1)
-PROGRESS|pass=GET|current=45|total=139|percent=32|stage=GET scan (run 1/1)
-PROGRESS|pass=GET|current=50|total=139|percent=35|stage=GET scan (run 1/1)
-PROGRESS|pass=GET|current=55|total=139|percent=39|stage=GET scan (run 1/1)
-PROGRESS|pass=GET|current=60|total=139|percent=43|stage=GET scan (run 1/1)
-PROGRESS|pass=GET|current=65|total=139|percent=46|stage=GET scan (run 1/1)
-PROGRESS|pass=GET|current=70|total=139|percent=50|stage=GET scan (run 1/1)
-PROGRESS|pass=GET|current=75|total=139|percent=53|stage=GET scan (run 1/1)
-PROGRESS|pass=GET|current=80|total=139|percent=57|stage=GET scan (run 1/1)
-PROGRESS|pass=GET|current=85|total=139|percent=61|stage=GET scan (run 1/1)
-PROGRESS|pass=GET|current=90|total=139|percent=64|stage=GET scan (run 1/1)
-PROGRESS|pass=GET|current=95|total=139|percent=68|stage=GET scan (run 1/1)
-PROGRESS|pass=GET|current=100|total=139|percent=71|stage=GET scan (run 1/1)
-PROGRESS|pass=GET|current=105|total=139|percent=75|stage=GET scan (run 1/1)
-PROGRESS|pass=GET|current=110|total=139|percent=79|stage=GET scan (run 1/1)
-PROGRESS|pass=GET|current=115|total=139|percent=82|stage=GET scan (run 1/1)
-PROGRESS|pass=GET|current=120|total=139|percent=86|stage=GET scan (run 1/1)
-PROGRESS|pass=GET|current=125|total=139|percent=89|stage=GET scan (run 1/1)
-PROGRESS|pass=GET|current=130|total=139|percent=93|stage=GET scan (run 1/1)
-PROGRESS|pass=GET|current=135|total=139|percent=97|stage=GET scan (run 1/1)
-PROGRESS|pass=GET|current=139|total=139|percent=100|stage=GET scan (run 1/1)
+Verifying... (Pass 2: GET) - 138 domains
+PROGRESS|pass=GET|current=5|total=138|percent=3|stage=GET scan (run 1/1)
+PROGRESS|pass=GET|current=10|total=138|percent=7|stage=GET scan (run 1/1)
+PROGRESS|pass=GET|current=15|total=138|percent=10|stage=GET scan (run 1/1)
+PROGRESS|pass=GET|current=20|total=138|percent=14|stage=GET scan (run 1/1)
+PROGRESS|pass=GET|current=25|total=138|percent=18|stage=GET scan (run 1/1)
+PROGRESS|pass=GET|current=30|total=138|percent=21|stage=GET scan (run 1/1)
+PROGRESS|pass=GET|current=35|total=138|percent=25|stage=GET scan (run 1/1)
+PROGRESS|pass=GET|current=40|total=138|percent=28|stage=GET scan (run 1/1)
+PROGRESS|pass=GET|current=45|total=138|percent=32|stage=GET scan (run 1/1)
+PROGRESS|pass=GET|current=50|total=138|percent=36|stage=GET scan (run 1/1)
+PROGRESS|pass=GET|current=55|total=138|percent=39|stage=GET scan (run 1/1)
+PROGRESS|pass=GET|current=60|total=138|percent=43|stage=GET scan (run 1/1)
+PROGRESS|pass=GET|current=65|total=138|percent=47|stage=GET scan (run 1/1)
+PROGRESS|pass=GET|current=70|total=138|percent=50|stage=GET scan (run 1/1)
+PROGRESS|pass=GET|current=75|total=138|percent=54|stage=GET scan (run 1/1)
+PROGRESS|pass=GET|current=80|total=138|percent=57|stage=GET scan (run 1/1)
+PROGRESS|pass=GET|current=85|total=138|percent=61|stage=GET scan (run 1/1)
+PROGRESS|pass=GET|current=90|total=138|percent=65|stage=GET scan (run 1/1)
+PROGRESS|pass=GET|current=95|total=138|percent=68|stage=GET scan (run 1/1)
+PROGRESS|pass=GET|current=100|total=138|percent=72|stage=GET scan (run 1/1)
+PROGRESS|pass=GET|current=105|total=138|percent=76|stage=GET scan (run 1/1)
+PROGRESS|pass=GET|current=110|total=138|percent=79|stage=GET scan (run 1/1)
+PROGRESS|pass=GET|current=115|total=138|percent=83|stage=GET scan (run 1/1)
+PROGRESS|pass=GET|current=120|total=138|percent=86|stage=GET scan (run 1/1)
+PROGRESS|pass=GET|current=125|total=138|percent=90|stage=GET scan (run 1/1)
+PROGRESS|pass=GET|current=130|total=138|percent=94|stage=GET scan (run 1/1)
+PROGRESS|pass=GET|current=135|total=138|percent=97|stage=GET scan (run 1/1)
+PROGRESS|pass=GET|current=138|total=138|percent=100|stage=GET scan (run 1/1)
 
 --- Verification Complete ---
 Total unique websites checked: 990
-Reachable websites: 883
-Unreachable websites: 107
-Successfully saved 883 rows to 'reachable/live_test_reachable.csv'
-Successfully saved full report for 990 unique URLs to 'all/live_test_report_all.csv'
+Reachable websites: 882
+Unreachable websites: 108

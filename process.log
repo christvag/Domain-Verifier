@@ -1,50 +1,140 @@
-Starting verification process for upload\live_test2.csv
-Found 48 unique domains to check
-PROGRESS|pass=HEAD|current=0|total=48|percent=0|stage=HEAD scan
-PROGRESS|pass=GET|current=2|total=4|percent=50|stage=GET scan (run 1/1)
-PROGRESS|pass=GET|current=3|total=4|percent=75|stage=GET scan (run 1/1)
-PROGRESS|pass=GET|current=4|total=4|percent=100|stage=GET scan (run 1/1)
+Starting verification process for upload/live_test.csv
+PROGRESS|pass=READ INPUT|current=0|total=1000|percent=0|stage=READ INPUT
+Found 990 unique domains to check
+PROGRESS|pass=HEAD|current=0|total=990|percent=0|stage=HEAD scan
+PROGRESS|pass=HEAD|current=10|total=990|percent=1|stage=HEAD scan
+PROGRESS|pass=HEAD|current=20|total=990|percent=2|stage=HEAD scan
+PROGRESS|pass=HEAD|current=30|total=990|percent=3|stage=HEAD scan
+PROGRESS|pass=HEAD|current=40|total=990|percent=4|stage=HEAD scan
+PROGRESS|pass=HEAD|current=50|total=990|percent=5|stage=HEAD scan
+PROGRESS|pass=HEAD|current=60|total=990|percent=6|stage=HEAD scan
+PROGRESS|pass=HEAD|current=70|total=990|percent=7|stage=HEAD scan
+PROGRESS|pass=HEAD|current=80|total=990|percent=8|stage=HEAD scan
+PROGRESS|pass=HEAD|current=90|total=990|percent=9|stage=HEAD scan
+PROGRESS|pass=HEAD|current=100|total=990|percent=10|stage=HEAD scan
+PROGRESS|pass=HEAD|current=110|total=990|percent=11|stage=HEAD scan
+PROGRESS|pass=HEAD|current=120|total=990|percent=12|stage=HEAD scan
+PROGRESS|pass=HEAD|current=130|total=990|percent=13|stage=HEAD scan
+PROGRESS|pass=HEAD|current=140|total=990|percent=14|stage=HEAD scan
+PROGRESS|pass=HEAD|current=150|total=990|percent=15|stage=HEAD scan
+PROGRESS|pass=HEAD|current=160|total=990|percent=16|stage=HEAD scan
+PROGRESS|pass=HEAD|current=170|total=990|percent=17|stage=HEAD scan
+PROGRESS|pass=HEAD|current=180|total=990|percent=18|stage=HEAD scan
+PROGRESS|pass=HEAD|current=190|total=990|percent=19|stage=HEAD scan
+PROGRESS|pass=HEAD|current=200|total=990|percent=20|stage=HEAD scan
+PROGRESS|pass=HEAD|current=210|total=990|percent=21|stage=HEAD scan
+PROGRESS|pass=HEAD|current=220|total=990|percent=22|stage=HEAD scan
+PROGRESS|pass=HEAD|current=230|total=990|percent=23|stage=HEAD scan
+PROGRESS|pass=HEAD|current=240|total=990|percent=24|stage=HEAD scan
+PROGRESS|pass=HEAD|current=250|total=990|percent=25|stage=HEAD scan
+PROGRESS|pass=HEAD|current=260|total=990|percent=26|stage=HEAD scan
+PROGRESS|pass=HEAD|current=270|total=990|percent=27|stage=HEAD scan
+PROGRESS|pass=HEAD|current=280|total=990|percent=28|stage=HEAD scan
+PROGRESS|pass=HEAD|current=290|total=990|percent=29|stage=HEAD scan
+PROGRESS|pass=HEAD|current=300|total=990|percent=30|stage=HEAD scan
+PROGRESS|pass=HEAD|current=310|total=990|percent=31|stage=HEAD scan
+PROGRESS|pass=HEAD|current=320|total=990|percent=32|stage=HEAD scan
+PROGRESS|pass=HEAD|current=330|total=990|percent=33|stage=HEAD scan
+PROGRESS|pass=HEAD|current=340|total=990|percent=34|stage=HEAD scan
+PROGRESS|pass=HEAD|current=350|total=990|percent=35|stage=HEAD scan
+PROGRESS|pass=HEAD|current=360|total=990|percent=36|stage=HEAD scan
+PROGRESS|pass=HEAD|current=370|total=990|percent=37|stage=HEAD scan
+PROGRESS|pass=HEAD|current=380|total=990|percent=38|stage=HEAD scan
+PROGRESS|pass=HEAD|current=390|total=990|percent=39|stage=HEAD scan
+PROGRESS|pass=HEAD|current=400|total=990|percent=40|stage=HEAD scan
+PROGRESS|pass=HEAD|current=410|total=990|percent=41|stage=HEAD scan
+PROGRESS|pass=HEAD|current=420|total=990|percent=42|stage=HEAD scan
+PROGRESS|pass=HEAD|current=430|total=990|percent=43|stage=HEAD scan
+PROGRESS|pass=HEAD|current=440|total=990|percent=44|stage=HEAD scan
+PROGRESS|pass=HEAD|current=450|total=990|percent=45|stage=HEAD scan
+PROGRESS|pass=HEAD|current=460|total=990|percent=46|stage=HEAD scan
+PROGRESS|pass=HEAD|current=470|total=990|percent=47|stage=HEAD scan
+PROGRESS|pass=HEAD|current=480|total=990|percent=48|stage=HEAD scan
+PROGRESS|pass=HEAD|current=490|total=990|percent=49|stage=HEAD scan
+PROGRESS|pass=HEAD|current=500|total=990|percent=50|stage=HEAD scan
+PROGRESS|pass=HEAD|current=510|total=990|percent=51|stage=HEAD scan
+PROGRESS|pass=HEAD|current=520|total=990|percent=52|stage=HEAD scan
+PROGRESS|pass=HEAD|current=530|total=990|percent=53|stage=HEAD scan
+PROGRESS|pass=HEAD|current=540|total=990|percent=54|stage=HEAD scan
+PROGRESS|pass=HEAD|current=550|total=990|percent=55|stage=HEAD scan
+PROGRESS|pass=HEAD|current=560|total=990|percent=56|stage=HEAD scan
+PROGRESS|pass=HEAD|current=570|total=990|percent=57|stage=HEAD scan
+PROGRESS|pass=HEAD|current=580|total=990|percent=58|stage=HEAD scan
+PROGRESS|pass=HEAD|current=590|total=990|percent=59|stage=HEAD scan
+PROGRESS|pass=HEAD|current=600|total=990|percent=60|stage=HEAD scan
+PROGRESS|pass=HEAD|current=610|total=990|percent=61|stage=HEAD scan
+PROGRESS|pass=HEAD|current=620|total=990|percent=62|stage=HEAD scan
+PROGRESS|pass=HEAD|current=630|total=990|percent=63|stage=HEAD scan
+PROGRESS|pass=HEAD|current=640|total=990|percent=64|stage=HEAD scan
+PROGRESS|pass=HEAD|current=650|total=990|percent=65|stage=HEAD scan
+PROGRESS|pass=HEAD|current=660|total=990|percent=66|stage=HEAD scan
+PROGRESS|pass=HEAD|current=670|total=990|percent=67|stage=HEAD scan
+PROGRESS|pass=HEAD|current=680|total=990|percent=68|stage=HEAD scan
+PROGRESS|pass=HEAD|current=690|total=990|percent=69|stage=HEAD scan
+PROGRESS|pass=HEAD|current=700|total=990|percent=70|stage=HEAD scan
+PROGRESS|pass=HEAD|current=710|total=990|percent=71|stage=HEAD scan
+PROGRESS|pass=HEAD|current=720|total=990|percent=72|stage=HEAD scan
+PROGRESS|pass=HEAD|current=730|total=990|percent=73|stage=HEAD scan
+PROGRESS|pass=HEAD|current=740|total=990|percent=74|stage=HEAD scan
+PROGRESS|pass=HEAD|current=750|total=990|percent=75|stage=HEAD scan
+PROGRESS|pass=HEAD|current=760|total=990|percent=76|stage=HEAD scan
+PROGRESS|pass=HEAD|current=770|total=990|percent=77|stage=HEAD scan
+PROGRESS|pass=HEAD|current=780|total=990|percent=78|stage=HEAD scan
+PROGRESS|pass=HEAD|current=790|total=990|percent=79|stage=HEAD scan
+PROGRESS|pass=HEAD|current=800|total=990|percent=80|stage=HEAD scan
+PROGRESS|pass=HEAD|current=810|total=990|percent=81|stage=HEAD scan
+PROGRESS|pass=HEAD|current=820|total=990|percent=82|stage=HEAD scan
+PROGRESS|pass=HEAD|current=830|total=990|percent=83|stage=HEAD scan
+PROGRESS|pass=HEAD|current=840|total=990|percent=84|stage=HEAD scan
+PROGRESS|pass=HEAD|current=850|total=990|percent=85|stage=HEAD scan
+PROGRESS|pass=HEAD|current=860|total=990|percent=86|stage=HEAD scan
+PROGRESS|pass=HEAD|current=870|total=990|percent=87|stage=HEAD scan
+PROGRESS|pass=HEAD|current=880|total=990|percent=88|stage=HEAD scan
+PROGRESS|pass=HEAD|current=890|total=990|percent=89|stage=HEAD scan
+PROGRESS|pass=HEAD|current=900|total=990|percent=90|stage=HEAD scan
+PROGRESS|pass=HEAD|current=910|total=990|percent=91|stage=HEAD scan
+PROGRESS|pass=HEAD|current=920|total=990|percent=92|stage=HEAD scan
+PROGRESS|pass=HEAD|current=930|total=990|percent=93|stage=HEAD scan
+PROGRESS|pass=HEAD|current=940|total=990|percent=94|stage=HEAD scan
+PROGRESS|pass=HEAD|current=950|total=990|percent=95|stage=HEAD scan
+PROGRESS|pass=HEAD|current=960|total=990|percent=96|stage=HEAD scan
+PROGRESS|pass=HEAD|current=970|total=990|percent=97|stage=HEAD scan
+PROGRESS|pass=HEAD|current=980|total=990|percent=98|stage=HEAD scan
+PROGRESS|pass=HEAD|current=990|total=990|percent=100|stage=HEAD scan
+
+Verifying... (Pass 2: GET) - 139 domains
+PROGRESS|pass=GET|current=5|total=139|percent=3|stage=GET scan (run 1/1)
+PROGRESS|pass=GET|current=10|total=139|percent=7|stage=GET scan (run 1/1)
+PROGRESS|pass=GET|current=15|total=139|percent=10|stage=GET scan (run 1/1)
+PROGRESS|pass=GET|current=20|total=139|percent=14|stage=GET scan (run 1/1)
+PROGRESS|pass=GET|current=25|total=139|percent=17|stage=GET scan (run 1/1)
+PROGRESS|pass=GET|current=30|total=139|percent=21|stage=GET scan (run 1/1)
+PROGRESS|pass=GET|current=35|total=139|percent=25|stage=GET scan (run 1/1)
+PROGRESS|pass=GET|current=40|total=139|percent=28|stage=GET scan (run 1/1)
+PROGRESS|pass=GET|current=45|total=139|percent=32|stage=GET scan (run 1/1)
+PROGRESS|pass=GET|current=50|total=139|percent=35|stage=GET scan (run 1/1)
+PROGRESS|pass=GET|current=55|total=139|percent=39|stage=GET scan (run 1/1)
+PROGRESS|pass=GET|current=60|total=139|percent=43|stage=GET scan (run 1/1)
+PROGRESS|pass=GET|current=65|total=139|percent=46|stage=GET scan (run 1/1)
+PROGRESS|pass=GET|current=70|total=139|percent=50|stage=GET scan (run 1/1)
+PROGRESS|pass=GET|current=75|total=139|percent=53|stage=GET scan (run 1/1)
+PROGRESS|pass=GET|current=80|total=139|percent=57|stage=GET scan (run 1/1)
+PROGRESS|pass=GET|current=85|total=139|percent=61|stage=GET scan (run 1/1)
+PROGRESS|pass=GET|current=90|total=139|percent=64|stage=GET scan (run 1/1)
+PROGRESS|pass=GET|current=95|total=139|percent=68|stage=GET scan (run 1/1)
+PROGRESS|pass=GET|current=100|total=139|percent=71|stage=GET scan (run 1/1)
+PROGRESS|pass=GET|current=105|total=139|percent=75|stage=GET scan (run 1/1)
+PROGRESS|pass=GET|current=110|total=139|percent=79|stage=GET scan (run 1/1)
+PROGRESS|pass=GET|current=115|total=139|percent=82|stage=GET scan (run 1/1)
+PROGRESS|pass=GET|current=120|total=139|percent=86|stage=GET scan (run 1/1)
+PROGRESS|pass=GET|current=125|total=139|percent=89|stage=GET scan (run 1/1)
+PROGRESS|pass=GET|current=130|total=139|percent=93|stage=GET scan (run 1/1)
+PROGRESS|pass=GET|current=135|total=139|percent=97|stage=GET scan (run 1/1)
+PROGRESS|pass=GET|current=139|total=139|percent=100|stage=GET scan (run 1/1)
 
 --- Verification Complete ---
-Total unique websites checked: 48
-Reachable websites: 45
-Unreachable websites: 3
-Successfully saved 45 rows to 'reachable\live_test2_reachable.csv'
-Successfully saved full report for 48 unique URLs to 'all\live_test2_report_all.csv'
-PROGRESS|pass=HEAD|current=2|total=48|percent=4|stage=HEAD scan
-PROGRESS|pass=HEAD|current=4|total=48|percent=8|stage=HEAD scan
-PROGRESS|pass=HEAD|current=6|total=48|percent=12|stage=HEAD scan
-PROGRESS|pass=HEAD|current=8|total=48|percent=16|stage=HEAD scan
-PROGRESS|pass=HEAD|current=10|total=48|percent=20|stage=HEAD scan
-PROGRESS|pass=HEAD|current=12|total=48|percent=25|stage=HEAD scan
-PROGRESS|pass=HEAD|current=14|total=48|percent=29|stage=HEAD scan
-PROGRESS|pass=HEAD|current=16|total=48|percent=33|stage=HEAD scan
-PROGRESS|pass=HEAD|current=18|total=48|percent=37|stage=HEAD scan
-PROGRESS|pass=HEAD|current=20|total=48|percent=41|stage=HEAD scan
-PROGRESS|pass=HEAD|current=22|total=48|percent=45|stage=HEAD scan
-PROGRESS|pass=HEAD|current=24|total=48|percent=50|stage=HEAD scan
-PROGRESS|pass=HEAD|current=26|total=48|percent=54|stage=HEAD scan
-PROGRESS|pass=HEAD|current=28|total=48|percent=58|stage=HEAD scan
-PROGRESS|pass=HEAD|current=30|total=48|percent=62|stage=HEAD scan
-PROGRESS|pass=HEAD|current=32|total=48|percent=66|stage=HEAD scan
-PROGRESS|pass=HEAD|current=34|total=48|percent=70|stage=HEAD scan
-PROGRESS|pass=HEAD|current=36|total=48|percent=75|stage=HEAD scan
-PROGRESS|pass=HEAD|current=38|total=48|percent=79|stage=HEAD scan
-PROGRESS|pass=HEAD|current=40|total=48|percent=83|stage=HEAD scan
-PROGRESS|pass=HEAD|current=42|total=48|percent=87|stage=HEAD scan
-PROGRESS|pass=HEAD|current=44|total=48|percent=91|stage=HEAD scan
-PROGRESS|pass=HEAD|current=46|total=48|percent=95|stage=HEAD scan
-PROGRESS|pass=HEAD|current=48|total=48|percent=100|stage=HEAD scan
-
-Verifying... (Pass 2: GET) - 4 domains
-PROGRESS|pass=GET|current=1|total=4|percent=25|stage=GET scan (run 1/1)
-PROGRESS|pass=GET|current=2|total=4|percent=50|stage=GET scan (run 1/1)
-PROGRESS|pass=GET|current=3|total=4|percent=75|stage=GET scan (run 1/1)
-PROGRESS|pass=GET|current=4|total=4|percent=100|stage=GET scan (run 1/1)
-
---- Verification Complete ---
-Total unique websites checked: 48
-Reachable websites: 45
-Unreachable websites: 3
-Successfully saved 45 rows to 'reachable\live_test2_reachable.csv'
-Successfully saved full report for 48 unique URLs to 'all\live_test2_report_all.csv'
+Total unique websites checked: 990
+Reachable websites: 883
+Unreachable websites: 107
+Successfully saved 883 rows to 'reachable/live_test_reachable.csv'
+Successfully saved full report for 990 unique URLs to 'all/live_test_report_all.csv'

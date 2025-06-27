@@ -1,0 +1,6 @@
+pandas
+numpy
+httpx
+tqdm
+streamlit
+watchdog

@@ -13,3 +13,9 @@ all/
 reachable/
 upload/
 process.log
+
+# signal flags
+*.flag
+
+# clean script
+clean.sh

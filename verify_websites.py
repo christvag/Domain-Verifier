@@ -57,18 +57,17 @@ import json
 from pathlib import Path
 import random
 import time
+import math
 
 import pandas as pd
-import numpy as np
 import httpx
-from tqdm.asyncio import tqdm as asyncio_tqdm
 
 from database_manager import save_run_to_db
 
 
 # Load user agents with fallback if file is missing
 try:
-    USER_AGENTS = json.load(open("src/form_autobot/user_agents.json"))
+    USER_AGENTS = json.load(open("user_agents.json"))
 except (FileNotFoundError, OSError, json.JSONDecodeError):
     USER_AGENTS = [
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36",
@@ -144,25 +143,31 @@ async def verify_domains(
     concurrency=100,
     column="website",
     log_path="process.log",
+    chunksize=15000,
 ):
     """
-    Verify domain reachability using a two-pass HEAD/GET method.
+    Verify domain reachability using a two-pass HEAD/GET method with batching.
 
     Args:
-        input_path: Path to the CSV file containing domains
-        retries: Number of GET request retries for failed domains
-        concurrency: Number of concurrent requests
-        column: Name of the column containing domains
-        log_path: Path to write logs to
+        input_path: Path to the CSV file containing domains.
+        start_time: The timestamp when the process began.
+        retries: Number of GET request retries for failed domains.
+        concurrency: Number of concurrent requests.
+        column: Name of the column containing domains.
+        log_path: Path to write logs to.
+        chunksize: Number of rows to process in each batch.
 
     Returns:
-        tuple: (reachable_df, report_df) DataFrames with results
+        tuple: (final_reachable_df, final_report_df) DataFrames with results.
     """
-    # Reset log file
+    stop_signal_file = Path("stop_processing.flag")
+    if stop_signal_file.exists():
+        stop_signal_file.unlink()  # Clean up from previous runs
+
+    # Reset log file for this run
     with open(log_path, "w") as f:
         f.write(f"Starting verification process for {input_path}\n")
 
-    # Log progress to file and update Streamlit UI
     def log_progress(pass_name, current, total, stage):
         percent = int((current / total) * 100) if total > 0 else 0
         progress_line = f"PROGRESS|pass={pass_name}|current={current}|total={total}|percent={percent}|stage={stage}\n"
@@ -170,153 +175,286 @@ async def verify_domains(
             f.write(progress_line)
             f.flush()
 
-    # Ensure output directories exist
     Path("reachable").mkdir(parents=True, exist_ok=True)
     Path("all").mkdir(parents=True, exist_ok=True)
 
-    # Generate output filenames
     base_name = Path(input_path).stem
     output_reachable_path = Path("reachable") / f"{base_name}_reachable.csv"
     output_report_path = Path("all") / f"{base_name}_report_all.csv"
 
+    # --- Calculate total batches ---
+    total_batches = "N/A"
     try:
-        df = pd.read_csv(input_path)
-        log_progress("READ INPUT", 0, len(df), "READ INPUT")
+        # Count lines for progress estimation without loading the whole file
+        with open(input_path, "r", encoding="utf-8", errors="ignore") as f:
+            total_rows = sum(1 for _ in f) - 1  # -1 for header
+        if total_rows > 0:
+            total_batches = math.ceil(total_rows / chunksize)
+        else:
+            total_batches = 1  # Even an empty file is one "batch" to process
+            total_rows = 0  # ensure it's not negative
+
+        with open(log_path, "a") as f:
+            f.write(
+                f"Input file has {total_rows} data rows. Processing in {total_batches} batches of up to {chunksize}.\n"
+            )
     except Exception as e:
         with open(log_path, "a") as f:
-            f.write(f"Error reading CSV file: {e}\n")
-            f.flush()
-        return None, None
+            f.write(
+                f"Could not pre-calculate total batches. Will proceed without batch count. Error: {e}\n"
+            )
 
-    if column not in df.columns:
-        error_msg = f"Column '{column}' not found in the CSV file. Available columns: {list(df.columns)}"
-        with open(log_path, "a") as f:
-            f.write(error_msg + "\n")
-            f.flush()
-        return None, None
-
-    urls_to_check = df[column].dropna().unique().tolist()
-    final_results_map = {}  # Initialize as empty dict
-
-    # Get random user agent
-    headers = {"User-Agent": random.choice(USER_AGENTS)}
-
-    with open(log_path, "a") as f:
-        f.write(f"Found {len(urls_to_check)} unique domains to check\n")
-
-    async with httpx.AsyncClient(headers=headers) as session:
-        # --- Pass 1: High-Speed HEAD Scan ---
-        log_progress("HEAD", 0, len(urls_to_check), "HEAD scan")
-
-        semaphore = asyncio.Semaphore(concurrency)
-        tasks = [is_reachable(url, session, semaphore, "HEAD") for url in urls_to_check]
-
-        completed = 0
-        for task in asyncio.as_completed(tasks):
-            try:
-                url, reachable, reason = await task
-                final_results_map[url] = {
-                    "url": url,
-                    "reachable": reachable,
-                    "remarks": reason,
-                }
-                completed += 1
-
-                # Log progress periodically or at completion
-                if completed % max(
-                    1, min(10, len(urls_to_check) // 20)
-                ) == 0 or completed == len(urls_to_check):
-                    log_progress("HEAD", completed, len(urls_to_check), "HEAD scan")
-
-            except Exception as e:
-                pass  # Silently handle exceptions to keep progress going
-
-        failed_urls = [
-            url for url, result in final_results_map.items() if not result["reachable"]
-        ]
-
-        # --- Pass 2: Robust GET Scan on Failures ---
-        if not failed_urls:
+    # --- State Management: Load already processed URLs to allow for resuming ---
+    processed_urls = set()
+    if output_report_path.exists():
+        try:
+            report_df_existing = pd.read_csv(output_report_path)
+            if "url" in report_df_existing.columns:
+                processed_urls = set(report_df_existing["url"].dropna().unique())
             with open(log_path, "a") as f:
                 f.write(
-                    "\nAll websites were reachable on the first pass. No second pass needed.\n"
+                    f"Resuming session. Found {len(processed_urls)} already processed URLs.\n"
                 )
-                f.flush()
-        else:
-            get_concurrency = max(10, concurrency // 2)
+        except (pd.errors.EmptyDataError, FileNotFoundError):
             with open(log_path, "a") as f:
-                f.write(f"\nVerifying... (Pass 2: GET) - {len(failed_urls)} domains\n")
-                f.flush()
+                f.write("Report file exists but is empty or invalid. Starting fresh.\n")
 
-            get_semaphore = asyncio.Semaphore(get_concurrency)
-            failed_remarks_history = {url: [] for url in failed_urls}
+    try:
+        df_iterator = pd.read_csv(input_path, chunksize=chunksize, on_bad_lines="warn")
+    except Exception as e:
+        with open(log_path, "a") as f:
+            f.write(f"Fatal error reading CSV file: {e}\n")
+            f.flush()
+        return None, None
 
-            for i in range(retries):
-                run_num = i + 1
-                if not failed_urls:
-                    with open(log_path, "a") as f:
-                        f.write(
-                            f"\nNo more URLs to check on run {run_num}. Stopping early.\n"
-                        )
-                        f.flush()
+    # --- Batch Processing ---
+    batch_num = 0
+    stop_requested = False
+    async with httpx.AsyncClient(headers=headers) as session:
+        for df_batch in df_iterator:
+            batch_num += 1
+
+            # Check for stop signal at the beginning of each batch
+            if stop_signal_file.exists():
+                with open(log_path, "a") as f:
+                    f.write("\nStop signal detected. Halting processing.\n")
+                stop_requested = True
+
+            if stop_requested:
+                break
+
+            if column not in df_batch.columns:
+                error_msg = f"Column '{column}' not found in the CSV file. Available columns: {list(df_batch.columns)}"
+                with open(log_path, "a") as f:
+                    f.write(error_msg + "\n")
+                    f.flush()
+                continue  # Skip to the next batch
+
+            urls_in_batch = df_batch[column].dropna().unique()
+            urls_to_check = [url for url in urls_in_batch if url not in processed_urls]
+
+            if not urls_to_check:
+                with open(log_path, "a") as f:
+                    f.write(
+                        f"Batch {batch_num}: All {len(urls_in_batch)} URLs already processed. Skipping.\n"
+                    )
+                continue
+
+            with open(log_path, "a") as f:
+                f.write(
+                    f"\n--- Processing Batch {batch_num}/{total_batches}: {len(urls_to_check)} new URLs ---\n"
+                )
+
+            final_results_map = {
+                url: {"url": url, "reachable": False, "remarks": "Not Processed"}
+                for url in urls_to_check
+            }
+
+            # --- Pass 1: High-Speed HEAD Scan ---
+            log_progress(
+                "HEAD", 0, len(urls_to_check), f"Batch {batch_num} - HEAD scan"
+            )
+            semaphore = asyncio.Semaphore(concurrency)
+            tasks = [
+                asyncio.create_task(is_reachable(url, session, semaphore, "HEAD"))
+                for url in urls_to_check
+            ]
+
+            completed = 0
+            for task in asyncio.as_completed(tasks):
+                try:
+                    url, reachable, reason = await task
+                    final_results_map[url] = {
+                        "url": url,
+                        "reachable": reachable,
+                        "remarks": reason,
+                    }
+                except asyncio.CancelledError:
+                    # This is an expected error when we cancel tasks, so we can safely ignore it.
+                    pass
+                completed += 1
+                if completed % 50 == 0 and stop_signal_file.exists():
+                    stop_requested = True
                     break
+                if completed % max(
+                    1, len(urls_to_check) // 100
+                ) == 0 or completed == len(urls_to_check):
+                    log_progress(
+                        "HEAD",
+                        completed,
+                        len(urls_to_check),
+                        f"Batch {batch_num} - HEAD scan",
+                    )
 
-                tasks = [
-                    is_reachable(url, session, get_semaphore, "GET")
-                    for url in failed_urls
-                ]
-                still_failing = []
+            if stop_requested:
+                with open(log_path, "a") as f:
+                    f.write(
+                        "\nStop signal detected during HEAD scan. Cancelling remaining tasks for this batch...\n"
+                    )
+                print("[DEBUG] Stop signal detected during HEAD; cancelling tasks...")
+                stop_requested = True
+                # Cancel all outstanding tasks to ensure a clean shutdown
+                for task in tasks:
+                    task.cancel()
+                # Wait for all tasks to acknowledge the cancellation
+                await asyncio.gather(*tasks, return_exceptions=True)
 
-                completed = 0
-                total = len(failed_urls)
-                for task in asyncio.as_completed(tasks):
-                    try:
-                        url, reachable, reason = await task
-                        if reachable:
-                            final_results_map[url] = {
-                                "url": url,
-                                "reachable": True,
-                                "remarks": reason,
-                            }
-                        else:
-                            still_failing.append(url)
-                            failed_remarks_history[url].append(reason)
+            failed_urls = [
+                url
+                for url, result in final_results_map.items()
+                if not result["reachable"]
+            ]
+
+            # --- Pass 2: Robust GET Scan on Failures ---
+            if failed_urls and not stop_requested:
+                get_concurrency = max(10, concurrency // 2)
+                get_semaphore = asyncio.Semaphore(get_concurrency)
+                failed_remarks_history = {url: [] for url in failed_urls}
+
+                for i in range(retries):
+                    run_num = i + 1
+                    if not failed_urls:
+                        break  # All failures resolved in previous retries
+
+                    if stop_requested:
+                        break
+
+                    tasks = [
+                        asyncio.create_task(
+                            is_reachable(url, session, get_semaphore, "GET")
+                        )
+                        for url in failed_urls
+                    ]
+                    still_failing = []
+
+                    completed = 0
+                    total = len(failed_urls)
+                    for task in asyncio.as_completed(tasks):
+                        try:
+                            url, reachable, reason = await task
+                            if reachable:
+                                final_results_map[url] = {
+                                    "url": url,
+                                    "reachable": True,
+                                    "remarks": reason,
+                                }
+                            else:
+                                still_failing.append(url)
+                                failed_remarks_history[url].append(reason)
+                        except asyncio.CancelledError:
+                            # This is an expected error when we cancel tasks, so we can safely ignore it.
+                            pass
 
                         completed += 1
-                        if (
-                            completed % max(1, min(5, total // 10)) == 0
-                            or completed == total
-                        ):
+                        if completed % 20 == 0 and stop_signal_file.exists():
+                            stop_requested = True
+                            break
+                        if completed % max(1, total // 100) == 0 or completed == total:
                             log_progress(
                                 "GET",
                                 completed,
                                 total,
-                                f"GET scan (run {run_num}/{retries})",
+                                f"Batch {batch_num} - GET run {run_num}/{retries}",
                             )
-                    except Exception:
-                        pass
 
-                failed_urls = still_failing
+                    if stop_requested:
+                        # Cancel any remaining tasks from this GET pass
+                        for task in tasks:
+                            task.cancel()
+                        await asyncio.gather(*tasks, return_exceptions=True)
+                        with open(log_path, "a") as f:
+                            f.write(
+                                "\nStop signal during GET pass. Cancelling remaining tasks...\n"
+                            )
+                        print(
+                            "[DEBUG] Stop signal detected during GET; cancelling tasks..."
+                        )
+                        stop_requested = True
 
-            for url in failed_urls:
-                if url in final_results_map and isinstance(
-                    final_results_map[url], dict
-                ):
+                    failed_urls = still_failing
+
+                for url in failed_urls:
                     final_results_map[url]["remarks"] = " -> ".join(
                         failed_remarks_history[url]
                     )
 
-    # --- Generate Final Output ---
-    report_df = pd.DataFrame(final_results_map.values())
-    reachable_urls = report_df[report_df["reachable"]]["url"]
-    reachable_df = df[df[column].isin(reachable_urls)]
+            # --- Append results of the batch to output files ---
+            report_df_batch = pd.DataFrame(final_results_map.values())
+            if not report_df_batch.empty:
+                report_df_batch.to_csv(
+                    output_report_path,
+                    mode="a",
+                    header=not output_report_path.exists()
+                    or output_report_path.stat().st_size == 0,
+                    index=False,
+                )
 
-    total_checked = len(urls_to_check)
-    total_reachable = len(reachable_urls.unique())
+                reachable_urls_batch = report_df_batch[report_df_batch["reachable"]][
+                    "url"
+                ]
+                reachable_df_batch = df_batch[
+                    df_batch[column].isin(reachable_urls_batch)
+                ]
 
-    # Save the files
-    reachable_df.to_csv(output_reachable_path, index=False)
-    report_df.to_csv(output_report_path, index=False)
+                if not reachable_df_batch.empty:
+                    reachable_df_batch.to_csv(
+                        output_reachable_path,
+                        mode="a",
+                        header=not output_reachable_path.exists()
+                        or output_reachable_path.stat().st_size == 0,
+                        index=False,
+                    )
+
+            # Update processed_urls set for the next batch
+            processed_urls.update(urls_to_check)
+
+            if stop_requested:
+                with open(log_path, "a") as f:
+                    f.write("\nPROCESS_STOPPED_BY_USER\n")
+                print(
+                    "[DEBUG] Verification process stopped gracefully after user request."
+                )
+                break
+
+    # --- Finalization Step ---
+    if stop_signal_file.exists():
+        stop_signal_file.unlink()
+
+    if not output_report_path.exists() or output_report_path.stat().st_size == 0:
+        with open(log_path, "a") as f:
+            f.write("\nNo URLs were processed. Exiting.\n")
+        return pd.DataFrame(), pd.DataFrame()
+
+    # Read the final, complete report to get aggregate statistics
+    final_report_df = pd.read_csv(output_report_path)
+    final_reachable_df = (
+        pd.read_csv(output_reachable_path)
+        if output_reachable_path.exists()
+        else pd.DataFrame(columns=df_batch.columns)
+    )
+
+    total_checked = len(final_report_df["url"].unique())
+    total_reachable = len(final_report_df[final_report_df["reachable"]]["url"].unique())
 
     # --- Save to Database ---
     end_time = time.time()
@@ -326,8 +464,8 @@ async def verify_domains(
         processing_time=processing_time,
         reachable_count=total_reachable,
         unreachable_count=(total_checked - total_reachable),
-        reachable_filepath=output_reachable_path,
-        report_filepath=output_report_path,
+        reachable_filepath=str(output_reachable_path),
+        report_filepath=str(output_report_path),
     )
 
     with open(log_path, "a") as f:
@@ -337,4 +475,5 @@ async def verify_domains(
         f.write(f"Unreachable websites: {total_checked - total_reachable}\n")
         f.flush()
 
-    return reachable_df, report_df
+    print("[DEBUG] verify_domains() exiting cleanly.")
+    return final_reachable_df, final_report_df

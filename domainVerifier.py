@@ -8,7 +8,7 @@ import asyncio
 import threading
 from pathlib import Path
 
-from database_manager import initialize_db, fetch_past_runs
+from database_manager import initialize_db, fetch_past_runs, clear_db
 
 # --- Page and State Setup ---
 st.set_page_config(page_title="Domain Verifier", layout="centered")
@@ -25,12 +25,19 @@ for key in [
     "last_upload_path",
     "reachable_df",
     "verification_complete_flag",
+    "was_stopped_flag",
+    "completion_timestamp",
 ]:
     if key not in st.session_state:
         st.session_state[key] = (
             False
             if key
-            in ["process_running", "process_finished", "verification_complete_flag"]
+            in [
+                "process_running",
+                "process_finished",
+                "verification_complete_flag",
+                "was_stopped_flag",
+            ]
             else None
         )
 
@@ -73,6 +80,17 @@ def get_latest_progress():
     return None
 
 
+def check_if_stopped():
+    """Checks if the log file indicates a manual stop."""
+    try:
+        if not os.path.exists(LOG_FILE_PATH):
+            return False
+        with open(LOG_FILE_PATH, "r", encoding="utf-8", errors="ignore") as f:
+            return "PROCESS_STOPPED_BY_USER" in f.read()
+    except Exception:
+        return False
+
+
 def run_verification_in_thread(file_path, retries, column_name):
     """
     Wrapper function to run the asyncio domain verification in a thread.
@@ -80,7 +98,9 @@ def run_verification_in_thread(file_path, retries, column_name):
     """
 
     def thread_target():
+        completion_file = Path("verification_complete.flag")
         try:
+            print(f"[DEBUG] Background thread starting verification...")
             loop = asyncio.new_event_loop()
             asyncio.set_event_loop(loop)
             from verify_websites import verify_domains
@@ -97,14 +117,29 @@ def run_verification_in_thread(file_path, retries, column_name):
             )
             st.session_state.reachable_df = reachable_df
             st.session_state.verification_error = None
+            print(
+                f"[DEBUG] Background thread completed successfully. Setting completion flag..."
+            )
         except Exception as e:
             st.session_state.verification_error = str(e)
-            print(f"Error in background thread: {e}")
+            print(f"[DEBUG] Error in background thread: {e}")
         finally:
             st.session_state.verification_complete_flag = True
+            st.session_state.completion_timestamp = time.time()
+            completion_file.touch()  # Create file signal
+            print(
+                f"[DEBUG] Background thread finished. Completion flag set at {st.session_state.completion_timestamp}"
+            )
+            print(f"[DEBUG] Created completion file: {completion_file}")
+
+    # Clean up any existing completion file
+    completion_file = Path("verification_complete.flag")
+    if completion_file.exists():
+        completion_file.unlink()
 
     t = threading.Thread(target=thread_target, daemon=True)
     t.start()
+    print(f"[DEBUG] Started background thread for verification")
 
 
 def display_progress_and_logs():
@@ -130,14 +165,57 @@ def display_progress_and_logs():
         log_container.code("".join(reversed(log_lines)), language="log")
 
 
+@st.fragment(run_every=0.5)
+def show_running_ui():
+    """Fragment that runs periodically to update the UI."""
+    if st.session_state.get("process_running"):
+        completion_file = Path("verification_complete.flag")
+        if (
+            st.session_state.get("verification_complete_flag")
+            or completion_file.exists()
+        ):
+            # This is the key: we check for completion *inside* the fragment's run.
+            print(f"[DEBUG] Fragment detected completion flag. Updating UI state...")
+            st.session_state.process_running = False
+            st.session_state.process_finished = True
+            st.session_state.verification_complete_flag = False
+            st.session_state.was_stopped_flag = check_if_stopped()
+            # Clean up the completion file
+            if completion_file.exists():
+                completion_file.unlink()
+                print(f"[DEBUG] Cleaned up completion file")
+            print(
+                f"[DEBUG] UI state updated. process_running=False, process_finished=True"
+            )
+            print(f"[DEBUG] Triggering full app rerun to update Start button...")
+            st.rerun()  # Changed from st.rerun(scope="fragment") to full app rerun
+        else:
+            # While running, just update the logs
+            display_progress_and_logs()
+    else:
+        # If not running, this fragment should do nothing.
+        # This prevents the "does not exist" error.
+        pass
+
+
 # --- Main Application Logic ---
-# Check for the completion flag. This is safe to keep in the main script body.
-if st.session_state.get("verification_complete_flag"):
+# Check for completion flag right at the top of the script logic
+completion_file = Path("verification_complete.flag")
+if st.session_state.get("verification_complete_flag") or completion_file.exists():
+    print(f"[DEBUG] Main logic detected completion flag. Updating UI state...")
     st.session_state.process_running = False
     st.session_state.process_finished = True
     st.session_state.verification_complete_flag = False
-    # A manual rerun here is now safe because there is no fragment to conflict with.
-    st.rerun()
+    st.session_state.was_stopped_flag = check_if_stopped()
+    # Clean up the completion file
+    if completion_file.exists():
+        completion_file.unlink()
+        print(f"[DEBUG] Main logic cleaned up completion file")
+    print(
+        f"[DEBUG] Main logic updated UI state. process_running=False, process_finished=True"
+    )
+    print(f"[DEBUG] Main logic triggering full app rerun...")
+    st.rerun()  # Changed from st.rerun(scope="fragment") to full app rerun
 
 
 upload_path = None
@@ -155,30 +233,38 @@ if st.button(
     disabled=st.session_state.process_running,
 ):
     if upload_path:
+        print(f"[DEBUG] Start button clicked. Initializing verification process...")
         st.session_state.process_running = True
         st.session_state.process_finished = False
         st.session_state.verification_complete_flag = False
+        st.session_state.was_stopped_flag = False
         st.session_state.reachable_df = None
         if os.path.exists(LOG_FILE_PATH):
             os.remove(LOG_FILE_PATH)
         run_verification_in_thread(upload_path, num_times, "website")
-        st.rerun()
+        print(f"[DEBUG] Verification process initialized. process_running=True")
     else:
         st.warning("Please upload a CSV file first.")
 
 # --- UI Display Logic ---
 if st.session_state.process_running:
     status_placeholder.info("⚙️ Processing... See live progress below.")
+    if st.button("Stop Verification", use_container_width=True, type="primary"):
+        Path("stop_processing.flag").touch()
+        status_placeholder.warning(
+            "🛑 Stop signal sent. The process will halt gracefully after the current batch. Please wait..."
+        )
+        st.session_state.was_stopped_flag = True
 
-    # Define and call the fragment ONLY when the process is running.
-    @st.fragment(run_every=0.5)
-    def show_running_progress():
-        display_progress_and_logs()
-
-    show_running_progress()
+    show_running_ui()
 
 elif st.session_state.process_finished:
-    status_placeholder.success("✅ Verification complete! Ready for next run.")
+    if st.session_state.get("was_stopped_flag"):
+        status_placeholder.warning(
+            "🛑 Process stopped by user. Ready to resume or start a new run."
+        )
+    else:
+        status_placeholder.success("✅ Verification complete! Ready for next run.")
     st.markdown("### Final Status")
     display_progress_and_logs()
 
@@ -206,7 +292,14 @@ def show_past_runs():
     """Displays a table of past runs with a manual refresh button."""
     st.markdown("---")
     st.subheader("Past Runs")
-    st.button("🔄 Refresh History")
+
+    refresh_button, clear_button = st.columns(2)
+    with refresh_button:
+        if st.button("🔄 Refresh History"):
+            st.rerun(scope="fragment")
+    with clear_button:
+        if st.button("🧹 Clear History", on_click=clear_db):
+            st.rerun(scope="fragment")
 
     past_runs = fetch_past_runs()
 

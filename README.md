@@ -27,7 +27,7 @@ Follow these instructions to get the Domain Verifier running on your local machi
 First, clone this repository to your local machine:
 
 ```bash
-git clone https://github.com/your-username/Domain-Verifier.git
+git clone https://github.com/christvag/Domain-Verifier.git
 cd Domain-Verifier
 ```
 

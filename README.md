@@ -38,6 +38,8 @@ It's highly recommended to use a virtual environment to keep dependencies isolat
 ```bash
 # Create a virtual environment
 python -m venv .venv
+# or try,
+python3 -m venv .venv
 
 # Activate the virtual environment
 # On Windows

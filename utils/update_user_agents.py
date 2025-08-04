@@ -1,4 +1,9 @@
-import json, httpx, re, datetime, pathlib, logging
+import json
+import httpx
+import re
+import datetime
+import pathlib
+import logging
 
 TARGETS = {
     "chrome": "https://versionhistory.googleapis.com/v1/chrome/platforms/linux/channels/stable/versions",

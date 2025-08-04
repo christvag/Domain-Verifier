@@ -19,3 +19,12 @@ process.log
 
 # clean script
 clean.sh
+
+CLAUDE.md
+
+form_test_results/
+*.pkl
+*.json
+models/sentence_model/
+
+test_urls.txt

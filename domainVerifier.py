@@ -1,14 +1,14 @@
 import streamlit as st
 import time
 import os
-import datetime
 import pandas as pd
-import re
 import asyncio
 import threading
 from pathlib import Path
 
 from database_manager import initialize_db, fetch_past_runs, clear_db
+from contact_form_crawler import ContactFormCrawler
+from centralized_logger import get_logger
 
 # --- Page and State Setup ---
 st.set_page_config(page_title="Domain Verifier", layout="centered")
@@ -27,6 +27,9 @@ for key in [
     "verification_complete_flag",
     "was_stopped_flag",
     "completion_timestamp",
+    "contact_crawl_running",
+    "contact_crawl_results",
+    "enable_contact_crawling",
 ]:
     if key not in st.session_state:
         st.session_state[key] = (
@@ -37,13 +40,15 @@ for key in [
                 "process_finished",
                 "verification_complete_flag",
                 "was_stopped_flag",
+                "contact_crawl_running",
+                "enable_contact_crawling",
             ]
             else None
         )
 
 # --- Global Variables and Placeholders ---
 status_placeholder = st.empty()
-LOG_FILE_PATH = os.path.join(os.getcwd(), "process.log")
+logger = get_logger()
 
 # --- UI: Instructions and File Uploader ---
 st.markdown(
@@ -59,36 +64,24 @@ num_times = st.number_input(
     "How many times to process the file?", min_value=1, max_value=100, value=1
 )
 
+# Contact form crawler option
+st.session_state.enable_contact_crawling = st.checkbox(
+    "🔍 Enable contact form discovery on reachable domains",
+    value=st.session_state.enable_contact_crawling,
+    help="After domain verification, automatically search for contact forms on reachable websites",
+)
+
 
 # --- Backend and Helper Functions ---
 def get_latest_progress():
-    """Reads the last known progress from the log file."""
-    try:
-        if not os.path.exists(LOG_FILE_PATH):
-            return None
-        with open(LOG_FILE_PATH, "r", encoding="utf-8", errors="ignore") as f:
-            for line in reversed(list(f)):
-                if line.startswith("PROGRESS|"):
-                    match = re.match(
-                        r"PROGRESS\|pass=(?P<pass>\w+)\|current=(?P<current>\d+)\|total=(?P<total>\d+)\|percent=(?P<percent>\d+)\|stage=(?P<stage>.+)",
-                        line.strip(),
-                    )
-                    if match:
-                        return match.groupdict()
-    except Exception:
-        return None
-    return None
+    """Gets the latest progress from the centralized logger."""
+    return logger.get_latest_progress()
 
 
 def check_if_stopped():
-    """Checks if the log file indicates a manual stop."""
-    try:
-        if not os.path.exists(LOG_FILE_PATH):
-            return False
-        with open(LOG_FILE_PATH, "r", encoding="utf-8", errors="ignore") as f:
-            return "PROCESS_STOPPED_BY_USER" in f.read()
-    except Exception:
-        return False
+    """Checks if the logger indicates a manual stop."""
+    logs = logger.get_logs_as_text()
+    return "PROCESS_STOPPED_BY_USER" in logs
 
 
 def run_verification_in_thread(file_path, retries, column_name):
@@ -100,7 +93,7 @@ def run_verification_in_thread(file_path, retries, column_name):
     def thread_target():
         completion_file = Path("verification_complete.flag")
         try:
-            print(f"[DEBUG] Background thread starting verification...")
+            print("[DEBUG] Background thread starting verification...")
             loop = asyncio.new_event_loop()
             asyncio.set_event_loop(loop)
             from verify_websites import verify_domains
@@ -112,14 +105,21 @@ def run_verification_in_thread(file_path, retries, column_name):
                     start_time=start_time,
                     retries=retries,
                     column=column_name,
-                    log_path=LOG_FILE_PATH,
+                    logger=logger,
                 )
             )
             st.session_state.reachable_df = reachable_df
             st.session_state.verification_error = None
             print(
-                f"[DEBUG] Background thread completed successfully. Setting completion flag..."
+                "[DEBUG] Background thread completed successfully. Setting completion flag..."
             )
+
+            # If contact crawling is enabled, start it now
+            if st.session_state.enable_contact_crawling and reachable_df is not None:
+                print(
+                    f"[DEBUG] Starting contact form crawling on {len(reachable_df)} reachable domains..."
+                )
+                run_contact_crawling_in_thread(reachable_df)
         except Exception as e:
             st.session_state.verification_error = str(e)
             print(f"[DEBUG] Error in background thread: {e}")
@@ -139,7 +139,85 @@ def run_verification_in_thread(file_path, retries, column_name):
 
     t = threading.Thread(target=thread_target, daemon=True)
     t.start()
-    print(f"[DEBUG] Started background thread for verification")
+    print("[DEBUG] Started background thread for verification")
+
+
+def run_contact_crawling_in_thread(reachable_df):
+    """
+    Run contact form crawling on reachable domains in a separate thread.
+    """
+
+    def crawl_thread_target():
+        try:
+            print("[DEBUG] Starting contact crawling thread...")
+            st.session_state.contact_crawl_running = True
+
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+
+            # Limit to first 10 domains to avoid overwhelming
+            domains_to_crawl = reachable_df["website"].head(10).tolist()
+            contact_results = []
+
+            for i, domain in enumerate(domains_to_crawl):
+                try:
+                    # Ensure domain has protocol
+                    if not domain.startswith(("http://", "https://")):
+                        domain = f"https://{domain}"
+
+                    print(
+                        f"[DEBUG] Crawling contact forms for {domain} ({i+1}/{len(domains_to_crawl)})"
+                    )
+
+                    crawler = ContactFormCrawler(
+                        domain=domain,
+                        max_pages=5,  # Limit pages for faster processing
+                        max_depth=2,
+                        crawl_strategy="priority_first",
+                        rate_limit=1.0,  # Be polite
+                        timeout=15,
+                    )
+
+                    forms = loop.run_until_complete(crawler.find_contact_forms())
+
+                    if forms:
+                        best_form = crawler.get_best_form()
+                        contact_results.append(
+                            {
+                                "domain": domain,
+                                "forms_found": len(forms),
+                                "best_form_url": best_form["page_url"],
+                                "confidence_score": best_form["confidence_score"],
+                                "field_types": list(best_form["field_types"]),
+                                "extracted_emails": best_form["extracted_contacts"][
+                                    "emails"
+                                ],
+                                "extracted_phones": best_form["extracted_contacts"][
+                                    "phones"
+                                ],
+                            }
+                        )
+                        print(f"[DEBUG] Found {len(forms)} forms for {domain}")
+                    else:
+                        print(f"[DEBUG] No forms found for {domain}")
+
+                except Exception as e:
+                    print(f"[DEBUG] Error crawling {domain}: {e}")
+                    continue
+
+            st.session_state.contact_crawl_results = contact_results
+            print(
+                f"[DEBUG] Contact crawling completed. Found forms on {len(contact_results)} domains"
+            )
+
+        except Exception as e:
+            print(f"[DEBUG] Error in contact crawling thread: {e}")
+        finally:
+            st.session_state.contact_crawl_running = False
+
+    t = threading.Thread(target=crawl_thread_target, daemon=True)
+    t.start()
+    print("[DEBUG] Started contact crawling thread")
 
 
 def display_progress_and_logs():
@@ -158,11 +236,13 @@ def display_progress_and_logs():
         if not st.session_state.get("process_finished"):
             st.info("Start a process to see live updates.")
 
-    if os.path.exists(LOG_FILE_PATH):
+    # Display logs from centralized logger
+    logs = logger.get_logs_as_text(last_n=50)  # Show last 50 entries
+    if logs:
         log_container = st.container(height=300)
-        with open(LOG_FILE_PATH, "r", encoding="utf-8", errors="ignore") as f:
-            log_lines = f.readlines()
-        log_container.code("".join(reversed(log_lines)), language="log")
+        # Reverse order to show newest first
+        log_lines = logs.split("\n")
+        log_container.code("\n".join(reversed(log_lines)), language="log")
 
 
 @st.fragment(run_every=0.5)
@@ -175,7 +255,7 @@ def show_running_ui():
             or completion_file.exists()
         ):
             # This is the key: we check for completion *inside* the fragment's run.
-            print(f"[DEBUG] Fragment detected completion flag. Updating UI state...")
+            print("[DEBUG] Fragment detected completion flag. Updating UI state...")
             st.session_state.process_running = False
             st.session_state.process_finished = True
             st.session_state.verification_complete_flag = False
@@ -183,11 +263,11 @@ def show_running_ui():
             # Clean up the completion file
             if completion_file.exists():
                 completion_file.unlink()
-                print(f"[DEBUG] Cleaned up completion file")
+                print("[DEBUG] Cleaned up completion file")
             print(
-                f"[DEBUG] UI state updated. process_running=False, process_finished=True"
+                "[DEBUG] UI state updated. process_running=False, process_finished=True"
             )
-            print(f"[DEBUG] Triggering full app rerun to update Start button...")
+            print("[DEBUG] Triggering full app rerun to update Start button...")
             st.rerun()  # Changed from st.rerun(scope="fragment") to full app rerun
         else:
             # While running, just update the logs
@@ -202,7 +282,7 @@ def show_running_ui():
 # Check for completion flag right at the top of the script logic
 completion_file = Path("verification_complete.flag")
 if st.session_state.get("verification_complete_flag") or completion_file.exists():
-    print(f"[DEBUG] Main logic detected completion flag. Updating UI state...")
+    print("[DEBUG] Main logic detected completion flag. Updating UI state...")
     st.session_state.process_running = False
     st.session_state.process_finished = True
     st.session_state.verification_complete_flag = False
@@ -210,11 +290,11 @@ if st.session_state.get("verification_complete_flag") or completion_file.exists(
     # Clean up the completion file
     if completion_file.exists():
         completion_file.unlink()
-        print(f"[DEBUG] Main logic cleaned up completion file")
+        print("[DEBUG] Main logic cleaned up completion file")
     print(
-        f"[DEBUG] Main logic updated UI state. process_running=False, process_finished=True"
+        "[DEBUG] Main logic updated UI state. process_running=False, process_finished=True"
     )
-    print(f"[DEBUG] Main logic triggering full app rerun...")
+    print("[DEBUG] Main logic triggering full app rerun...")
     st.rerun()  # Changed from st.rerun(scope="fragment") to full app rerun
 
 
@@ -233,16 +313,15 @@ if st.button(
     disabled=st.session_state.process_running,
 ):
     if upload_path:
-        print(f"[DEBUG] Start button clicked. Initializing verification process...")
+        print("[DEBUG] Start button clicked. Initializing verification process...")
         st.session_state.process_running = True
         st.session_state.process_finished = False
         st.session_state.verification_complete_flag = False
         st.session_state.was_stopped_flag = False
         st.session_state.reachable_df = None
-        if os.path.exists(LOG_FILE_PATH):
-            os.remove(LOG_FILE_PATH)
+        logger.clear()  # Clear previous logs
         run_verification_in_thread(upload_path, num_times, "website")
-        print(f"[DEBUG] Verification process initialized. process_running=True")
+        print("[DEBUG] Verification process initialized. process_running=True")
     else:
         st.warning("Please upload a CSV file first.")
 
@@ -280,6 +359,58 @@ elif st.session_state.process_finished:
             file_name=f"{base_name}_verified.csv",
             use_container_width=True,
         )
+
+    # Display contact crawling status and results
+    if st.session_state.enable_contact_crawling:
+        st.markdown("### Contact Form Discovery")
+
+        if st.session_state.contact_crawl_running:
+            st.info("🔍 Searching for contact forms on reachable domains...")
+
+        elif st.session_state.contact_crawl_results:
+            results = st.session_state.contact_crawl_results
+            st.success(f"✅ Contact forms found on {len(results)} domains!")
+
+            # Create a nice display of results
+            for result in results:
+                with st.expander(
+                    f"📧 {result['domain']} - {result['forms_found']} form(s) found"
+                ):
+                    col1, col2 = st.columns(2)
+
+                    with col1:
+                        st.write(f"**Best Form URL:** {result['best_form_url']}")
+                        st.write(
+                            f"**Confidence Score:** {result['confidence_score']:.2f}"
+                        )
+                        st.write(f"**Field Types:** {', '.join(result['field_types'])}")
+
+                    with col2:
+                        if result["extracted_emails"]:
+                            st.write(
+                                f"**Emails Found:** {', '.join(result['extracted_emails'])}"
+                            )
+                        if result["extracted_phones"]:
+                            st.write(
+                                f"**Phones Found:** {', '.join(result['extracted_phones'])}"
+                            )
+
+            # Export contact results to CSV
+            if results:
+                contact_df = pd.DataFrame(results)
+                contact_csv = contact_df.to_csv(index=False).encode("utf-8")
+                st.download_button(
+                    label="⬇️ Download Contact Forms Data",
+                    data=contact_csv,
+                    file_name=f"{base_name}_contact_forms.csv",
+                    use_container_width=True,
+                )
+
+        elif (
+            st.session_state.process_finished
+            and not st.session_state.contact_crawl_running
+        ):
+            st.info("No contact forms found on the reachable domains.")
 else:
     # Initial state
     st.markdown("---")

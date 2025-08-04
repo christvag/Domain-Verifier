@@ -51,7 +51,6 @@ Setup and Usage
 
 """
 
-import argparse
 import asyncio
 import json
 from pathlib import Path
@@ -63,6 +62,7 @@ import pandas as pd
 import httpx
 
 from database_manager import save_run_to_db
+from centralized_logger import get_logger
 
 
 # Load user agents with fallback if file is missing
@@ -142,7 +142,7 @@ async def verify_domains(
     retries=2,
     concurrency=100,
     column="website",
-    log_path="process.log",
+    logger=None,
     chunksize=15000,
 ):
     """
@@ -154,26 +154,40 @@ async def verify_domains(
         retries: Number of GET request retries for failed domains.
         concurrency: Number of concurrent requests.
         column: Name of the column containing domains.
-        log_path: Path to write logs to.
+        logger: Centralized logger instance.
         chunksize: Number of rows to process in each batch.
 
     Returns:
         tuple: (final_reachable_df, final_report_df) DataFrames with results.
     """
+    # Use provided logger or get default
+    if logger is None:
+        logger = get_logger()
+
     stop_signal_file = Path("stop_processing.flag")
     if stop_signal_file.exists():
         stop_signal_file.unlink()  # Clean up from previous runs
 
-    # Reset log file for this run
-    with open(log_path, "w") as f:
-        f.write(f"Starting verification process for {input_path}\n")
+    logger.info(f"Starting verification process for {input_path}")
 
     def log_progress(pass_name, current, total, stage):
         percent = int((current / total) * 100) if total > 0 else 0
-        progress_line = f"PROGRESS|pass={pass_name}|current={current}|total={total}|percent={percent}|stage={stage}\n"
-        with open(log_path, "a") as f:
-            f.write(progress_line)
-            f.flush()
+        logger.progress(
+            f"{stage} ({current}/{total})",
+            pass_=pass_name,
+            current=current,
+            total=total,
+            percent=percent,
+            stage=stage,
+        )
+
+    def log_info(message):
+        """Helper function to log info messages"""
+        logger.info(message)
+
+    def log_warning(message):
+        """Helper function to log warning messages"""
+        logger.warning(message)
 
     Path("reachable").mkdir(parents=True, exist_ok=True)
     Path("all").mkdir(parents=True, exist_ok=True)
@@ -194,15 +208,13 @@ async def verify_domains(
             total_batches = 1  # Even an empty file is one "batch" to process
             total_rows = 0  # ensure it's not negative
 
-        with open(log_path, "a") as f:
-            f.write(
-                f"Input file has {total_rows} data rows. Processing in {total_batches} batches of up to {chunksize}.\n"
-            )
+        log_info(
+            f"Input file has {total_rows} data rows. Processing in {total_batches} batches of up to {chunksize}."
+        )
     except Exception as e:
-        with open(log_path, "a") as f:
-            f.write(
-                f"Could not pre-calculate total batches. Will proceed without batch count. Error: {e}\n"
-            )
+        log_warning(
+            f"Could not pre-calculate total batches. Will proceed without batch count. Error: {e}"
+        )
 
     # --- State Management: Load already processed URLs to allow for resuming ---
     processed_urls = set()
@@ -211,20 +223,16 @@ async def verify_domains(
             report_df_existing = pd.read_csv(output_report_path)
             if "url" in report_df_existing.columns:
                 processed_urls = set(report_df_existing["url"].dropna().unique())
-            with open(log_path, "a") as f:
-                f.write(
-                    f"Resuming session. Found {len(processed_urls)} already processed URLs.\n"
-                )
+            log_info(
+                f"Resuming session. Found {len(processed_urls)} already processed URLs."
+            )
         except (pd.errors.EmptyDataError, FileNotFoundError):
-            with open(log_path, "a") as f:
-                f.write("Report file exists but is empty or invalid. Starting fresh.\n")
+            log_info("Report file exists but is empty or invalid. Starting fresh.")
 
     try:
         df_iterator = pd.read_csv(input_path, chunksize=chunksize, on_bad_lines="warn")
     except Exception as e:
-        with open(log_path, "a") as f:
-            f.write(f"Fatal error reading CSV file: {e}\n")
-            f.flush()
+        logger.error(f"Fatal error reading CSV file: {e}")
         return None, None
 
     # --- Batch Processing ---
@@ -236,8 +244,7 @@ async def verify_domains(
 
             # Check for stop signal at the beginning of each batch
             if stop_signal_file.exists():
-                with open(log_path, "a") as f:
-                    f.write("\nStop signal detected. Halting processing.\n")
+                log_info("Stop signal detected. Halting processing.")
                 stop_requested = True
 
             if stop_requested:
@@ -245,25 +252,21 @@ async def verify_domains(
 
             if column not in df_batch.columns:
                 error_msg = f"Column '{column}' not found in the CSV file. Available columns: {list(df_batch.columns)}"
-                with open(log_path, "a") as f:
-                    f.write(error_msg + "\n")
-                    f.flush()
+                logger.error(error_msg)
                 continue  # Skip to the next batch
 
             urls_in_batch = df_batch[column].dropna().unique()
             urls_to_check = [url for url in urls_in_batch if url not in processed_urls]
 
             if not urls_to_check:
-                with open(log_path, "a") as f:
-                    f.write(
-                        f"Batch {batch_num}: All {len(urls_in_batch)} URLs already processed. Skipping.\n"
-                    )
+                log_info(
+                    f"Batch {batch_num}: All {len(urls_in_batch)} URLs already processed. Skipping."
+                )
                 continue
 
-            with open(log_path, "a") as f:
-                f.write(
-                    f"\n--- Processing Batch {batch_num}/{total_batches}: {len(urls_to_check)} new URLs ---\n"
-                )
+            log_info(
+                f"--- Processing Batch {batch_num}/{total_batches}: {len(urls_to_check)} new URLs ---"
+            )
 
             final_results_map = {
                 url: {"url": url, "reachable": False, "remarks": "Not Processed"}
@@ -307,10 +310,9 @@ async def verify_domains(
                     )
 
             if stop_requested:
-                with open(log_path, "a") as f:
-                    f.write(
-                        "\nStop signal detected during HEAD scan. Cancelling remaining tasks for this batch...\n"
-                    )
+                log_info(
+                    "Stop signal detected during HEAD scan. Cancelling remaining tasks for this batch..."
+                )
                 print("[DEBUG] Stop signal detected during HEAD; cancelling tasks...")
                 stop_requested = True
                 # Cancel all outstanding tasks to ensure a clean shutdown
@@ -382,10 +384,9 @@ async def verify_domains(
                         for task in tasks:
                             task.cancel()
                         await asyncio.gather(*tasks, return_exceptions=True)
-                        with open(log_path, "a") as f:
-                            f.write(
-                                "\nStop signal during GET pass. Cancelling remaining tasks...\n"
-                            )
+                        log_info(
+                            "Stop signal during GET pass. Cancelling remaining tasks..."
+                        )
                         print(
                             "[DEBUG] Stop signal detected during GET; cancelling tasks..."
                         )
@@ -429,8 +430,7 @@ async def verify_domains(
             processed_urls.update(urls_to_check)
 
             if stop_requested:
-                with open(log_path, "a") as f:
-                    f.write("\nPROCESS_STOPPED_BY_USER\n")
+                logger.info("PROCESS_STOPPED_BY_USER")
                 print(
                     "[DEBUG] Verification process stopped gracefully after user request."
                 )
@@ -441,8 +441,7 @@ async def verify_domains(
         stop_signal_file.unlink()
 
     if not output_report_path.exists() or output_report_path.stat().st_size == 0:
-        with open(log_path, "a") as f:
-            f.write("\nNo URLs were processed. Exiting.\n")
+        log_info("No URLs were processed. Exiting.")
         return pd.DataFrame(), pd.DataFrame()
 
     # Read the final, complete report to get aggregate statistics
@@ -468,12 +467,10 @@ async def verify_domains(
         report_filepath=str(output_report_path),
     )
 
-    with open(log_path, "a") as f:
-        f.write(f"\n--- Verification Complete ---\n")
-        f.write(f"Total unique websites checked: {total_checked}\n")
-        f.write(f"Reachable websites: {total_reachable}\n")
-        f.write(f"Unreachable websites: {total_checked - total_reachable}\n")
-        f.flush()
+    log_info("--- Verification Complete ---")
+    log_info(f"Total unique websites checked: {total_checked}")
+    log_info(f"Reachable websites: {total_reachable}")
+    log_info(f"Unreachable websites: {total_checked - total_reachable}")
 
     print("[DEBUG] verify_domains() exiting cleanly.")
     return final_reachable_df, final_report_df

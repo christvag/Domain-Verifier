@@ -1,6 +1,5 @@
 import sqlite3
 import shutil
-import os
 from pathlib import Path
 
 DB_PATH = "verifier.db"

@@ -60,6 +60,15 @@ async def main():
 
 asyncio.run(main())
 "
+
+# Generate the simple CSV RESULT with a specifi csv and limit
+python test_contact_crawler.py --csv live_test_sample.csv --limit 2
+
+# Generate both simple and detailed CSV RESULT with detail
+python test_contact_crawler.py --csv live_test_sample.csv --limit 2 --detail
+
+# Generate both simple and detailed CSV RESULT to desired output folder
+python test_contact_crawler.py --csv live_test_sample.csv --limit 2 --output-dir my_results
 ```
 
 ## 🤖 Machine Learning Model

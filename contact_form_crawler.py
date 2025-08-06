@@ -105,12 +105,13 @@ class ContactFormCrawler:
             self.sentence_model = None
             self.classifier = None
 
-    async def crawl_csv_domains(self, save_detail: bool = False) -> str:
+    async def crawl_csv_domains(self, save_detail: bool = False, column_name: str = "contact_url") -> str:
         """
         Process all domains from CSV file and output results as CSV
         
         Args:
             save_detail: If True, also save a detailed version with all fields
+            column_name: Name for the contact URL column in the CSV
             
         Returns:
             str: Path to output CSV file
@@ -119,6 +120,7 @@ class ContactFormCrawler:
             raise FileNotFoundError(f"CSV file not found: {self.csv_file_path}")
             
         # Read CSV file
+        import pandas as pd
         df = pd.read_csv(self.csv_file_path)
         
         # Check for website column
@@ -155,8 +157,8 @@ class ContactFormCrawler:
             # Progress update
             self.logger.info(f"📊 Progress: {i}/{len(domains)} domains processed, {len(self.results)} total contact URLs found")
             
-        # Save results to CSV
-        output_path = self._save_results_to_csv(save_detail=save_detail)
+        # Save results to CSV with custom column name
+        output_path = self._save_results_to_csv(save_detail=save_detail, column_name=column_name)
         
         self.logger.info(f"✅ Crawling completed. Found {len(self.results)} contact URLs across {len(domains)} domains")
         self.logger.info(f"📄 Results saved to: {output_path}")
@@ -242,12 +244,13 @@ class ContactFormCrawler:
             self.logger.error(f"Error processing {domain}: {str(e)}")
             return []
 
-    def _save_results_to_csv(self, save_detail: bool = False) -> str:
+    def _save_results_to_csv(self, save_detail: bool = False, column_name: str = "contact_url") -> str:
         """
         Save crawling results to CSV file with only contact URLs
         
         Args:
             save_detail: If True, also save a detailed version with all columns
+            column_name: Name for the contact URL column in the CSV
             
         Returns:
             Path to the generated CSV file
@@ -264,8 +267,8 @@ class ContactFormCrawler:
         # Extract just the contact URLs
         contact_urls = [result['contact_url'] for result in self.results]
         
-        # Create DataFrame with just one column
-        df = pd.DataFrame(contact_urls, columns=['contact_url'])
+        # Create DataFrame with custom column name
+        df = pd.DataFrame(contact_urls, columns=[column_name])
         
         # Save to CSV without index
         df.to_csv(output_path, index=False, header=True)
@@ -277,7 +280,7 @@ class ContactFormCrawler:
             pd.DataFrame(self.results).to_csv(detail_path, index=False)
             self.logger.info(f"Detailed version saved to {detail_path}")
         
-        self.logger.info(f"Saved {len(contact_urls)} contact URLs to {output_path}")
+        self.logger.info(f"Saved {len(contact_urls)} contact URLs to {output_path} with column name '{column_name}'")
         
         return str(output_path)
 
@@ -906,6 +909,12 @@ async def main():
         action="store_true",
         help="Save detailed CSV with all fields (domain, link text, confidence, etc.)"
     )
+    parser.add_argument(
+        "--columnName",
+        type=str,
+        default="contact_url",
+        help="Name for the contact URL column in the CSV (default: contact_url)"
+    )
     
     args = parser.parse_args()
     
@@ -923,10 +932,11 @@ async def main():
     
     try:
         # Process CSV
-        output_path = await crawler.crawl_csv_domains(save_detail=args.detail)
+        output_path = await crawler.crawl_csv_domains(save_detail=args.detail, column_name=args.columnName)
         
         print(f"\n✅ Crawling completed successfully!")
         print(f"📄 Results saved to: {output_path}")
+        print(f"📝 Column name: '{args.columnName}'")
         if args.detail:
             detail_path = output_path.replace("contact_links_", "contact_links_detail_")
             print(f"📊 Detailed results saved to: {detail_path}")

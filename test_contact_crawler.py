@@ -63,7 +63,7 @@ class LimitedContactFormCrawler(ContactFormCrawler):
         
         return results
     
-    async def crawl_csv_domains(self, save_detail: bool = False) -> str:
+    async def crawl_csv_domains(self, save_detail: bool = False, column_name: str = "contact_url") -> str:
         """Override to handle early stopping and show progress"""
         if not self.csv_file_path or not Path(self.csv_file_path).exists():
             raise FileNotFoundError(f"CSV file not found: {self.csv_file_path}")
@@ -119,8 +119,8 @@ class LimitedContactFormCrawler(ContactFormCrawler):
                 self.logger.error(f"Error crawling {domain}: {e}")
                 print(f"❌ Error processing {domain}: {str(e)}")
 
-        # Save results to CSV
-        output_path = self._save_results_to_csv(save_detail=save_detail)
+        # Save results to CSV with custom column name
+        output_path = self._save_results_to_csv(save_detail=save_detail, column_name=column_name)
         
         self.logger.info(f"✅ Crawling completed. Found {len(self.results)} contact URLs")
         self.logger.info(f"📄 Results saved to: {output_path}")
@@ -129,7 +129,8 @@ class LimitedContactFormCrawler(ContactFormCrawler):
 
 
 async def test_crawler(csv_file: str = "live_test_sample.csv", result_limit: int = None, 
-                       output_dir: str = "contact_results", save_detail: bool = False):
+                       output_dir: str = "contact_results", save_detail: bool = False, 
+                       column_name: str = "contact_url"):
     """Test the contact form crawler with the specified CSV"""
     
     if not Path(csv_file).exists():
@@ -140,6 +141,8 @@ async def test_crawler(csv_file: str = "live_test_sample.csv", result_limit: int
     print(f"🚀 Testing Contact Form Crawler with {csv_file}")
     if result_limit:
         print(f"🎯 Result limit: {result_limit} contact URLs")
+    if column_name != "contact_url":
+        print(f"📝 Custom column name: '{column_name}'")
     print("=" * 60)
     
     # Initialize limited crawler
@@ -160,10 +163,11 @@ async def test_crawler(csv_file: str = "live_test_sample.csv", result_limit: int
             print(f"⚠️  Will stop after finding {result_limit} contact URLs (may process fewer than {len(df)} domains)")
         
         # Run crawler
-        output_path = await crawler.crawl_csv_domains(save_detail=save_detail)
+        output_path = await crawler.crawl_csv_domains(save_detail=save_detail, column_name=column_name)
         
         print(f"\n✅ Crawling completed!")
         print(f"📄 Results saved to: {output_path}")
+        print(f"📝 Column name: '{column_name}'")
         if save_detail:
             detail_path = output_path.replace("contact_links_", "contact_links_detail_")
             print(f"📊 Detailed results saved to: {detail_path}")
@@ -213,11 +217,12 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  python test_contact_crawler.py                                    # Uses live_test_sample.csv
-  python test_contact_crawler.py --csv my_domains.csv              # Uses custom CSV file
-  python test_contact_crawler.py --csv my_domains.csv --limit 5    # Custom CSV with 5 result limit
-  python test_contact_crawler.py --limit 10 --output-dir test_results
-  python test_contact_crawler.py --csv large_list.csv --limit 20 --detail    # With detailed output
+  python test_contact_crawler.py                                                # Uses live_test_sample.csv
+  python test_contact_crawler.py --csv my_domains.csv                          # Uses custom CSV file
+  python test_contact_crawler.py --csv my_domains.csv --limit 5                # Custom CSV with 5 result limit
+  python test_contact_crawler.py --limit 10 --output-dir test_results          # Custom output directory
+  python test_contact_crawler.py --csv large_list.csv --limit 20 --detail      # With detailed output
+  python test_contact_crawler.py --csv live_test_sample.csv --limit 2 --columnName "website_url"  # Custom column name
         """
     )
     
@@ -248,6 +253,13 @@ Examples:
         help="Save detailed CSV with all fields (domain, link text, confidence, etc.)"
     )
     
+    parser.add_argument(
+        "--columnName",
+        type=str,
+        default="contact_url",
+        help="Name for the contact URL column in the CSV (default: contact_url)"
+    )
+    
     args = parser.parse_args()
     
     # Validate arguments
@@ -260,7 +272,8 @@ Examples:
         csv_file=args.csv,
         result_limit=args.limit,
         output_dir=args.output_dir,
-        save_detail=args.detail
+        save_detail=args.detail,
+        column_name=args.columnName
     ))
     
     sys.exit(0 if success else 1)

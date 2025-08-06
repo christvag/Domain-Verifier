@@ -64,6 +64,9 @@ asyncio.run(main())
 # Generate the simple CSV RESULT with a specifi csv and limit
 python test_contact_crawler.py --csv live_test_sample.csv --limit 2
 
+# Generate the simple CSV RESULT with a specifi csv and column name for csv
+python test_contact_crawler.py --csv live_test_sample.csv --columnName "website"
+
 # Generate both simple and detailed CSV RESULT with detail
 python test_contact_crawler.py --csv live_test_sample.csv --limit 2 --detail
 

@@ -27,8 +27,19 @@ async def main():
         default="https://aldcoair.com",
         help="URL to test (default: https://aldcoair.com)",
     )
+    parser.add_argument(
+        "--log-level",
+        type=str,
+        default="INFO",
+        choices=["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"],
+        help="Set logging level (default: INFO)"
+    )
 
     args = parser.parse_args()
+
+    # Set logger level globally
+    import centralized_logger
+    centralized_logger.get_logger().setLevel(args.log_level.upper())
 
     # Validate URL
     if not args.url.startswith(("http://", "https://")):

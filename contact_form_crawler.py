@@ -85,10 +85,11 @@ class ContactFormCrawler:
             classifier_path = self.model_dir / "contact_classifier.pkl"
 
             if not sentence_model_path.exists() or not classifier_path.exists():
-                self.logger.warning("⚠️ Pre-trained models not found. Run contact_link_trainer.py first")
+                self.logger.info(f"⚠️ Pre-trained models not found. Run contact_link_trainer.py first")
+                self.logger.info(f"   Looking for: {sentence_model_path} and {classifier_path}")
                 return
 
-            self.logger.info("📥 Loading pre-trained models...")
+            self.logger.info(f"📥 Loading pre-trained models...")
 
             # Load sentence transformer
             self.sentence_model = SentenceTransformer(str(sentence_model_path))
@@ -97,11 +98,12 @@ class ContactFormCrawler:
             with open(classifier_path, "rb") as f:
                 self.classifier = pickle.load(f)
 
-            self.logger.info("✅ Pre-trained models loaded successfully")
+            self.logger.info(f"✅ Pre-trained models loaded successfully")
             self._models_loaded = True
 
         except Exception as e:
-            self.logger.error(f"⚠️ Failed to load pre-trained models: {e}")
+            self.logger.info(f"⚠️ Failed to load pre-trained models: {e}")
+            self.logger.info(f"   Run: python contact_link_trainer.py")
             self.sentence_model = None
             self.classifier = None
 
@@ -292,11 +294,25 @@ class ContactFormCrawler:
         """
         Two-stage process: ML classification then form detection
         """
-        self.logger.info(f"🎯 Finding contact forms for {self.domain}")
-        self.logger.info(f"ML Model: {'✅ Using pre-trained model' if self.classifier else '❌ Using heuristics'}")
+        # Load models first to get accurate status
+        self._load_pretrained_models()
+
+        self.logger.info(
+            f"\n"
+            + "="*80
+            + "\n🎯 TWO-STAGE CONTACT FORM FINDER\n"
+            + "="*80
+            + f"\nTarget URL: {self.domain}\n"
+            + f"ML Model: {'✅ Pre-trained' if self.classifier else '❌ Using heuristics'}\n"
+            + "="*80
+        )
 
         # STAGE 1: Get all links and classify them
-        self.logger.info("🔍 STAGE 1: LINK CLASSIFICATION")
+        self.logger.info(
+            f"\n🔍 STAGE 1: LINK CLASSIFICATION\n"
+            + "="*40
+        )
+
         all_links = await self._get_all_links()
         contact_links = self._classify_links_with_model(all_links)
 
@@ -305,7 +321,11 @@ class ContactFormCrawler:
             return []
 
         # STAGE 2: Visit contact links and check for forms
-        self.logger.info("🔍 STAGE 2: FORM DETECTION")
+        self.logger.info(
+            f"\n🔍 STAGE 2: FORM DETECTION\n"
+            + "="*40
+        )
+
         actual_forms = await self._check_links_for_forms(contact_links)
 
         self.found_forms = actual_forms
@@ -458,7 +478,7 @@ class ContactFormCrawler:
 
     def _classify_with_pretrained_model(self, all_links: List[Dict]) -> List[Dict]:
         """Use pre-trained model to classify links"""
-        self.logger.info("   Using pre-trained binary classifier...")
+        self.logger.info(f"   Using pre-trained binary classifier...")
 
         contact_links = []
 
@@ -472,9 +492,11 @@ class ContactFormCrawler:
         probabilities = self.classifier.predict_proba(embeddings)
 
         for i, (link, prob) in enumerate(zip(all_links, probabilities), 1):
-            # Use threshold of 0.25 for contact classification (lowered to catch more cases)
             confidence = float(prob[1])  # Probability of being contact-related
             is_contact = confidence > 0.25
+
+            status = "✅ YES" if is_contact else "❌ NO"
+            self.logger.info(f"   {i:2d}. {status} ({confidence:.3f}) {link['full_url']}")
 
             if is_contact:
                 link["confidence"] = confidence
@@ -482,16 +504,18 @@ class ContactFormCrawler:
                 link["classifier_confidence"] = confidence
                 contact_links.append(link)
 
-        self.logger.info(f"📊 Classification Results:")
-        self.logger.info(f"   - Total links: {len(all_links)}")
-        self.logger.info(f"   - Contact links (YES): {len(contact_links)}")
-        self.logger.info(f"   - Non-contact links (NO): {len(all_links) - len(contact_links)}")
+        self.logger.info(
+            f"📊 Classification Results:\n"
+            f"   - Total links: {len(all_links)}\n"
+            f"   - Contact links (YES): {len(contact_links)}\n"
+            f"   - Non-contact links (NO): {len(all_links) - len(contact_links)}"
+        )
 
         return contact_links
 
     def _classify_links_heuristic(self, all_links: List[Dict]) -> List[Dict]:
         """Fallback heuristic classification"""
-        self.logger.info("   Using heuristic classification...")
+        self.logger.info(f"   Using heuristic classification...")
 
         contact_links = []
         contact_keywords = ["contact", "support", "help", "about", "feedback", "sales"]
@@ -502,67 +526,21 @@ class ContactFormCrawler:
             is_contact = any(keyword in text_lower for keyword in contact_keywords)
             confidence = 0.7 if is_contact else 0.3
 
+            status = "✅ YES" if is_contact else "❌ NO"
+            self.logger.info(f"   {i:2d}. {status} ({confidence:.3f}) '{link['text'][:40]}...' → {link['href']}")
+
             if is_contact:
                 link["confidence"] = confidence
                 link["ml_prediction"] = "YES"
                 contact_links.append(link)
 
-        self.logger.info(f"📊 Classification Results:")
-        self.logger.info(f"   - Total links: {len(all_links)}")
-        self.logger.info(f"   - Contact links (YES): {len(contact_links)}")
+        self.logger.info(
+            f"📊 Classification Results:\n"
+            f"   - Total links: {len(all_links)}\n"
+            f"   - Contact links (YES): {len(contact_links)}"
+        )
 
         return contact_links
-
-    def _generate_url_variations(self, base_url: str) -> List[str]:
-        """Generate common URL variations to check for contact forms"""
-        from urllib.parse import urlparse, urlunparse
-
-        variations = [base_url]  # Always try the original first
-
-        parsed = urlparse(base_url)
-        path = parsed.path.rstrip("/")
-
-        # Common file variations for contact pages
-        common_files = [
-            "index.html",
-            "index.php",
-            "default.html",
-            "contact.html",
-            "contact.php",
-        ]
-
-        for file in common_files:
-            # Add file to the path
-            if path.endswith(".html") or path.endswith(".php"):
-                # Replace existing file
-                path_parts = path.split("/")
-                path_parts[-1] = file
-                new_path = "/".join(path_parts)
-            else:
-                # Add file to directory path
-                new_path = f"{path}/{file}" if path else f"/{file}"
-
-            variation_url = urlunparse(
-                (
-                    parsed.scheme,
-                    parsed.netloc,
-                    new_path,
-                    parsed.params,
-                    parsed.query,
-                    parsed.fragment,
-                )
-            )
-
-            if variation_url not in variations:
-                variations.append(variation_url)
-
-        # If original doesn't end with /, try with trailing slash
-        if not base_url.endswith("/") and not any(
-            base_url.endswith(ext) for ext in [".html", ".php", ".asp", ".aspx"]
-        ):
-            variations.append(f"{base_url}/")
-
-        return variations
 
     async def _check_links_for_forms(self, contact_links: List[Dict]) -> List[Dict]:
         """Visit each contact link and check for actual contact forms"""
@@ -579,77 +557,70 @@ class ContactFormCrawler:
             for i, link in enumerate(contact_links, 1):
                 self.logger.info(f"   {i}. Checking: {link['full_url']}")
 
-                # Generate URL variations to check
                 urls_to_check = self._generate_url_variations(link["full_url"])
 
                 form_found = False
                 for j, url_variant in enumerate(urls_to_check):
                     if url_variant in self.crawled_urls:
-                        continue  # Skip already crawled URLs
+                        continue
 
                     variation_label = f"main" if j == 0 else f"variant {j}"
-                    self.logger.debug(f"      🔗 Trying {variation_label}: {url_variant}")
+                    self.logger.info(f"      🔗 Trying {variation_label}: {url_variant}")
 
                     try:
-                        # Visit the page
                         crawl_result = await crawler.arun(
                             url_variant, config=crawl_config
                         )
 
                         if not crawl_result.success:
-                            self.logger.debug(
+                            self.logger.warning(
                                 f"         ❌ Failed to load (Status: {crawl_result.status_code if crawl_result.status_code else 'No response'})"
                             )
                             continue
 
-                        self.logger.debug(
-                            f"         ✅ Page loaded (Status: {crawl_result.status_code})"
-                        )
+                        self.logger.info(f"         ✅ Page loaded (Status: {crawl_result.status_code})")
 
-                        # Parse and look for forms
                         soup = BeautifulSoup(crawl_result.html, "html.parser")
                         forms = self._find_contact_forms_on_page(soup, url_variant)
 
                         if forms:
-                            self.logger.info(f"         🎯 Found {len(forms)} contact form(s)!")
+                            self.logger.info(
+                                f"         🎯 Found {len(forms)} contact form(s)!"
+                            )
                             for form in forms:
                                 form["source_link"] = link
-                                form["actual_url"] = (
-                                    url_variant  # Track which variation worked
-                                )
+                                form["actual_url"] = url_variant
                                 form["link_confidence"] = link.get(
                                     "classifier_confidence", link.get("confidence", 0)
                                 )
                                 actual_forms.append(form)
                             form_found = True
                         else:
-                            self.logger.debug(f"         ➡️ No forms found on this variant")
+                            self.logger.info(f"         ➡️ No forms found on this variant")
 
                         self.crawled_urls.add(url_variant)
 
-                        # If we found forms, no need to check more variations for this link
                         if form_found:
                             break
 
-                        # Be polite - wait between requests
                         await asyncio.sleep(0.5)
 
                     except Exception as e:
-                        self.logger.warning(f"         ❌ Error checking variant: {str(e)}")
+                        self.logger.error(f"         ❌ Error checking variant: {str(e)}")
 
                 if not form_found:
-                    self.logger.debug(f"      ❌ No forms found in any variation")
+                    self.logger.warning(f"      ❌ No forms found in any variation")
 
-                # Longer wait between different contact links
                 await asyncio.sleep(1)
 
-        # Deduplicate forms based on form signature
         deduplicated_forms = self._deduplicate_forms(actual_forms)
 
-        self.logger.info(f"📊 Form Detection Results:")
-        self.logger.info(f"   - Contact links checked: {len(contact_links)}")
-        self.logger.info(f"   - Total forms found: {len(actual_forms)}")
-        self.logger.info(f"   - Unique forms (after deduplication): {len(deduplicated_forms)}")
+        self.logger.info(
+            f"📊 Form Detection Results:\n"
+            f"   - Contact links checked: {len(contact_links)}\n"
+            f"   - Total forms found: {len(actual_forms)}\n"
+            f"   - Unique forms (after deduplication): {len(deduplicated_forms)}"
+        )
 
         return deduplicated_forms
 
@@ -713,7 +684,7 @@ class ContactFormCrawler:
         for form in unique_forms:
             if "found_on_pages" in form and len(form["found_on_pages"]) > 1:
                 form["duplicate_count"] = len(form["found_on_pages"])
-                self.logger.debug(f"   📋 Deduplicated: Same form found on {len(form['found_on_pages'])} pages")
+                self.logger.info(f"   📋 Deduplicated: Same form found on {len(form['found_on_pages'])} pages")
 
         return unique_forms
 
@@ -824,16 +795,9 @@ class ContactFormCrawler:
 
             # Also check for common contact-related keywords in iframe src
             contact_keywords = [
-                "contact",
-                "form",
-                "inquiry",
-                "quote",
-                "appointment",
-                "booking",
+                "contact", "form", "inquiry", "quote", "appointment", "booking",
             ]
-            has_contact_keywords = any(
-                keyword in src.lower() for keyword in contact_keywords
-            )
+            has_contact_keywords = any(keyword in src.lower() for keyword in contact_keywords)
 
             # Check iframe attributes for contact-related info
             iframe_class = iframe.get("class", [])
@@ -844,9 +808,7 @@ class ContactFormCrawler:
                 iframe_class = " ".join(iframe_class)
 
             iframe_attrs = f"{iframe_class} {iframe_id} {iframe_title}".lower()
-            has_contact_attrs = any(
-                keyword in iframe_attrs for keyword in contact_keywords
-            )
+            has_contact_attrs = any(keyword in iframe_attrs for keyword in contact_keywords)
 
             if detected_service or has_contact_keywords or has_contact_attrs:
                 # Calculate confidence based on detection method
@@ -860,30 +822,77 @@ class ContactFormCrawler:
 
                 confidence = min(confidence, 1.0)
 
-                contact_forms.append(
-                    {
-                        "page_url": page_url,
-                        "form_index": i,
-                        "form_type": "iframe_form",
-                        "iframe_src": src,
-                        "detected_service": detected_service or "Unknown",
-                        "confidence_score": confidence,
-                        "is_contact_form": True,
-                        "form_action": src,
-                        "form_method": "IFRAME",
-                        "discovery_method": "iframe_form_detection",
-                        "field_types": {
-                            "iframe": 1
-                        },  # Placeholder since we can't inspect iframe content
-                        "field_count": 1,
-                        "contact_field_count": 1,
-                    }
-                )
+                contact_forms.append({
+                    "page_url": page_url,
+                    "form_index": i,
+                    "form_type": "iframe_form",
+                    "iframe_src": src,
+                    "detected_service": detected_service or "Unknown",
+                    "confidence_score": confidence,
+                    "is_contact_form": True,
+                    "form_action": src,
+                    "form_method": "IFRAME",
+                    "discovery_method": "iframe_form_detection",
+                    "field_types": {"iframe": 1},  # Placeholder since we can't inspect iframe content
+                    "field_count": 1,
+                    "contact_field_count": 1,
+                })
 
-                self.logger.debug(f"🎯 Found iframe contact form: {detected_service or 'Unknown service'}")
-                self.logger.debug(f"   Source: {src[:80]}{'...' if len(src) > 80 else ''}")
+                self.logger.info(f"            🎯 Found iframe contact form: {detected_service or 'Unknown service'}")
+                self.logger.info(f"               Source: {src[:80]}{'...' if len(src) > 80 else ''}")
 
         return contact_forms
+
+    def _generate_url_variations(self, base_url: str) -> List[str]:
+        """Generate common URL variations to check for contact forms"""
+        from urllib.parse import urlparse, urlunparse
+
+        variations = [base_url]  # Always try the original first
+
+        parsed = urlparse(base_url)
+        path = parsed.path.rstrip("/")
+
+        # Common file variations for contact pages
+        common_files = [
+            "index.html",
+            "index.php", 
+            "default.html",
+            "contact.html",
+            "contact.php",
+        ]
+
+        for file in common_files:
+            # Add file to the path
+            if path.endswith(".html") or path.endswith(".php"):
+                # Replace existing file
+                path_parts = path.split("/")
+                path_parts[-1] = file
+                new_path = "/".join(path_parts)
+            else:
+                # Add file to directory path
+                new_path = f"{path}/{file}" if path else f"/{file}"
+
+            variation_url = urlunparse(
+                (
+                    parsed.scheme,
+                    parsed.netloc,
+                    new_path,
+                    parsed.params,
+                    parsed.query,
+                    parsed.fragment,
+                )
+            )
+
+            if variation_url not in variations:
+                variations.append(variation_url)
+
+        # If original doesn't end with /, try with trailing slash
+        if not base_url.endswith("/") and not any(
+            base_url.endswith(ext) for ext in [".html", ".php", ".asp", ".aspx"]
+        ):
+            variations.append(f"{base_url}/")
+
+        return variations
 
 
 # CLI interface for direct usage
@@ -921,7 +930,9 @@ async def main():
     # Validate CSV file
     csv_path = args.csv
     if not Path(csv_path).exists():
-        print(f"❌ CSV file not found: {csv_path}")
+        # Use a temporary logger for this error
+        logger = get_logger()
+        logger.error(f"❌ CSV file not found: {csv_path}")
         return 1
         
     # Create crawler and process domains
@@ -934,25 +945,26 @@ async def main():
         # Process CSV
         output_path = await crawler.crawl_csv_domains(save_detail=args.detail, column_name=args.columnName)
         
-        print(f"\n✅ Crawling completed successfully!")
-        print(f"📄 Results saved to: {output_path}")
-        print(f"📝 Column name: '{args.columnName}'")
+        crawler.logger.info(
+            "✅ Crawling completed successfully!\n"
+            f"📄 Results saved to: {output_path}\n"
+            f"📝 Column name: '{args.columnName}'"
+        )
         if args.detail:
             detail_path = output_path.replace("contact_links_", "contact_links_detail_")
-            print(f"📊 Detailed results saved to: {detail_path}")
+            crawler.logger.info(f"📊 Detailed results saved to: {detail_path}")
         
         if crawler.results:
-            print(f"\n📊 Summary:")
-            print(f"   - Total contact URLs found: {len(crawler.results)}")
-            
-            # Count unique domains
-            domains = set(r['domain'] for r in crawler.results)
-            print(f"   - Domains with contact URLs: {len(domains)}")
-        
+            crawler.logger.info(
+                "📊 Summary:\n"
+                f"   - Total contact URLs found: {len(crawler.results)}\n"
+                f"   - Domains with contact URLs: {len(set(r['domain'] for r in crawler.results))}"
+            )
+    
         return 0
         
     except Exception as e:
-        print(f"❌ Error: {str(e)}")
+        crawler.logger.error(f"❌ Error: {str(e)}")
         import traceback
         traceback.print_exc()
         return 1

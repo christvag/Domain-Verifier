@@ -232,35 +232,42 @@ Examples:
         default="live_test_sample.csv",
         help="CSV file containing domains to crawl (default: live_test_sample.csv)"
     )
-    
     parser.add_argument(
         "--limit",
         type=int,
         default=None,
         help="Stop crawling after finding this many contact URLs (default: no limit)"
     )
-    
     parser.add_argument(
         "--output-dir",
         type=str,
         default="contact_results",
         help="Output directory for results (default: contact_results)"
     )
-    
     parser.add_argument(
         "--detail",
         action="store_true",
         help="Save detailed CSV with all fields (domain, link text, confidence, etc.)"
     )
-    
     parser.add_argument(
         "--columnName",
         type=str,
         default="contact_url",
         help="Name for the contact URL column in the CSV (default: contact_url)"
     )
+    parser.add_argument(
+        "--log-level",
+        type=str,
+        default="INFO",
+        choices=["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"],
+        help="Set logging level (default: INFO)"
+    )
     
     args = parser.parse_args()
+    
+    # Set logger level globally
+    import centralized_logger
+    centralized_logger.get_logger().setLevel(args.log_level.upper())
     
     # Validate arguments
     if args.limit is not None and args.limit <= 0:

@@ -299,6 +299,24 @@ class ContactLinkTrainer:
     def find_optimal_threshold(X_test, y_test) -> float
 ```
 
+## 🖥️ Streamlit Web App
+
+You can use the Streamlit interface for interactive domain verification and contact form discovery.
+
+### Run the Streamlit app
+```
+streamlit run domainVerifier.py
+```
+
+### How to use the Streamlit app
+
+- Upload your domain CSV file.
+- Click Start Verification.
+- Watch live progress and logs.
+- Download results when finished.
+- Optionally, enable contact form discovery for reachable domains.
+
+
 ## 🤝 Contributing
 
 1. **Fork the repository**

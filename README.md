@@ -60,6 +60,20 @@ async def main():
 
 asyncio.run(main())
 "
+# Generate the simple CSV RESULT with a specifi csv and loglevel INFO
+python test_contact_crawler.py --csv live_test_sample.csv --log-level INFO
+
+# Generate the simple CSV RESULT with a specifi csv and limit
+python test_contact_crawler.py --csv live_test_sample.csv --limit 2 --log-level INFO
+
+# Generate the simple CSV RESULT with a specifi csv and column name for csv
+python test_contact_crawler.py --csv live_test_sample.csv --columnName "website" --log-level INFO
+
+# Generate both simple and detailed CSV RESULT with detail
+python test_contact_crawler.py --csv live_test_sample.csv --limit 2 --detail --log-level INFO
+
+# Generate both simple and detailed CSV RESULT to desired output folder
+python test_contact_crawler.py --csv live_test_sample.csv --limit 2 --output-dir my_results --log-level INFO
 ```
 
 ## 🤖 Machine Learning Model
@@ -284,6 +298,27 @@ class ContactLinkTrainer:
     def test_predictions()
     def find_optimal_threshold(X_test, y_test) -> float
 ```
+
+## 🖥️ Streamlit Web App
+
+![streamlit deployment](./image_guides/domain-verifier-streamlit.png "image")
+
+You can use the Streamlit interface for interactive domain verification and contact form discovery.
+
+### Run the Streamlit app
+```
+streamlit run domainVerifier.py
+```
+
+### How to use the Streamlit app
+
+- Upload your domain CSV file.
+- Click Start Verification.
+- Watch live progress and logs.
+- Download results when finished.
+- Optionally, enable contact form discovery for reachable domains.
+- Process Reachable domains
+
 
 ## 🤝 Contributing
 

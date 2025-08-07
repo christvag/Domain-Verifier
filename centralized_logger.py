@@ -19,6 +19,7 @@ from typing import Optional, List, Dict, Any
 from enum import Enum
 from dataclasses import dataclass
 from datetime import datetime
+import logging
 
 
 class LogLevel(Enum):
@@ -62,17 +63,29 @@ class CentralizedLogger:
     - Integration with Streamlit session state
     """
 
-    def __init__(self, max_entries: int = 1000):
+    def __init__(self, name="contact_form_crawler", max_entries: int = 1000):
         """
         Initialize the centralized logger.
 
         Args:
+            name: Logger name
             max_entries: Maximum number of log entries to keep in memory
         """
+        self.name = name
         self.max_entries = max_entries
         self._logs = deque(maxlen=max_entries)
         self._lock = threading.RLock()
         self._progress_info = {}
+
+        # Initialize Python logger
+        self._logger = logging.getLogger(name)
+        if not self._logger.hasHandlers():
+            handler = logging.StreamHandler()
+            # Only print the message, no timestamp or log level
+            formatter = logging.Formatter("%(message)s")
+            handler.setFormatter(formatter)
+            self._logger.addHandler(handler)
+        self._logger.setLevel(logging.INFO)
 
     def _add_entry(
         self, level: LogLevel, message: str, context: Optional[Dict[str, Any]] = None
@@ -92,18 +105,22 @@ class CentralizedLogger:
     def debug(self, message: str, **context):
         """Log a debug message"""
         self._add_entry(LogLevel.DEBUG, message, context)
+        self._logger.debug(message, extra=context)
 
     def info(self, message: str, **context):
         """Log an info message"""
         self._add_entry(LogLevel.INFO, message, context)
+        self._logger.info(message, extra=context)
 
     def warning(self, message: str, **context):
         """Log a warning message"""
         self._add_entry(LogLevel.WARNING, message, context)
+        self._logger.warning(message, extra=context)
 
     def error(self, message: str, **context):
         """Log an error message"""
         self._add_entry(LogLevel.ERROR, message, context)
+        self._logger.error(message, extra=context)
 
     def progress(self, message: str, **context):
         """
@@ -171,6 +188,10 @@ class CentralizedLogger:
 
         stats["total"] = len(logs)
         return stats
+
+    def setLevel(self, level):
+        """Set the logging level"""
+        self._logger.setLevel(level)
 
 
 # Global logger instance

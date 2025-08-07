@@ -301,6 +301,8 @@ class ContactLinkTrainer:
 
 ## 🖥️ Streamlit Web App
 
+![streamlit deployment](./image_guides/domain-verifier-streamlit.png "image")
+
 You can use the Streamlit interface for interactive domain verification and contact form discovery.
 
 ### Run the Streamlit app
@@ -315,6 +317,7 @@ streamlit run domainVerifier.py
 - Watch live progress and logs.
 - Download results when finished.
 - Optionally, enable contact form discovery for reachable domains.
+- Process Reachable domains
 
 
 ## 🤝 Contributing

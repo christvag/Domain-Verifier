@@ -439,21 +439,20 @@ def show_past_runs():
         return
 
     # add new column header
-    cols = st.columns((2, 1, 1, 1, 1, 1, 1))
+    cols = st.columns((2, 1, 1, 1, 1, 1))  # was (2, 1, 1, 1, 1, 1, 1)
     headers = [
         "File Processed",
         "Processing Time",
         "Reachable",
         "Unreachable",
         "Reachable File",
-        "Full Report",
-        "Process Reachables",
+        "Full Report"
     ]
     for col, hdr in zip(cols, headers):
         col.write(f"**{hdr}**")
 
     for run in past_runs:
-        cols = st.columns((2, 1, 1, 1, 1, 1, 1))
+        cols = st.columns((2, 1, 1, 1, 1, 1))  # was (2, 1, 1, 1, 1, 1, 1)
         cols[0].write(run["filename"])
         cols[1].write(f"{run['processing_time']:.2f}s")
         cols[2].write(f"✔️ {run['reachable_count']}")
@@ -483,11 +482,7 @@ def show_past_runs():
         if limit_key not in st.session_state:
             st.session_state[limit_key] = min(10, run['reachable_count'])
 
-        process_key = f"process_{run['id']}"
-        if cols[6].button("🔍", key=process_key):
-            st.session_state[expander_key] = True
-
-        # --- Expander with persistent state ---
+        # Always show the expander for each run (no button needed)
         with st.expander(f"Process Reachables for {run['filename']}", expanded=st.session_state[expander_key]):
             import pandas as pd
 
@@ -498,19 +493,31 @@ def show_past_runs():
             def keep_expander_open():
                 st.session_state[expander_key] = True
 
-            limit = st.number_input(
-                "Max domains to process",
-                min_value=1,
-                max_value=max_lim,
-                value=st.session_state[limit_key],
-                key=limit_key,
-                on_change=keep_expander_open
-            )
+            limit_col, all_col = st.columns([5, 1])
+
+            with all_col:
+                st.markdown(
+                    f"""
+                    <button class="stButton all-btn-align" onclick="window.location.reload(false);" style="width:100%; height: 38px;" 
+                    id="all-btn-{run['id']}" 
+                    form="form">{'All'}</button>
+                    """,
+                    unsafe_allow_html=True,
+                )
+            with limit_col:
+                limit = st.number_input(
+                    f"Max domains to process out of {run['reachable_count']}",
+                    min_value=1,
+                    max_value=max_lim,
+                    value=st.session_state[limit_key],
+                    key=limit_key,
+                    on_change=keep_expander_open
+                )
 
             # Start button
             start_key = f"start_{run['id']}"
             if st.button("Start", key=start_key):
-                st.session_state[expander_key] = True  # Keep open after start
+                st.session_state[expander_key] = True
 
                 # Prepare temp CSV with limited domains
                 tmp_dir = Path("tmp")
@@ -521,9 +528,18 @@ def show_past_runs():
                 contacts = []
                 placeholder = st.empty()
 
+                progress_placeholder = st.empty()
+
                 def on_result(new_url):
                     contacts.append(new_url)
                     st.session_state[f"contacts_{run['id']}"] = contacts.copy()
+                    processed = len(contacts)
+                    total = run['reachable_count']
+                    percent = round(float((processed / total) * 100),1)
+                    progress_placeholder.progress(
+                        processed / total,
+                        text=f"Found {processed} out of {total} Reachable Domains ({percent}%)"
+                    )
                     # Prepare DataFrame for display
                     df_live = pd.DataFrame(contacts)
                     if not df_live.empty:
@@ -579,6 +595,19 @@ st.markdown(
     .stDataFrame thead tr th:first-child,
     .stDataFrame tbody tr td:first-child {
         display: none;
+    }
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
+
+# Add this CSS once after your other st.markdown CSS:
+st.markdown(
+    """
+    <style>
+    .all-btn-align {
+        margin-top: 28px !important;  /* Adjust this value as needed for your theme */
+        width: 100%;
     }
     </style>
     """,

@@ -46,7 +46,7 @@ class ContactFormCrawler:
     - Outputs contact URLs to CSV
     """
 
-    def __init__(self, domain: str = None, csv_file_path: str = None, output_dir: str = "contact_results"):
+    def __init__(self, domain: str = None, csv_file_path: str = None, output_dir: str = "tmp"):
         # Initialize for single domain or CSV mode
         self.domain = domain.rstrip("/") if domain else None
         self.csv_file_path = csv_file_path
@@ -247,44 +247,54 @@ class ContactFormCrawler:
             self.logger.error(f"Error processing {domain}: {str(e)}")
             return []
 
-    def _save_results_to_csv(self, save_detail: bool = False, column_name: str = "contact_url") -> str:
+    def _save_results_to_csv(
+        self,
+        save_detail: bool = False,
+        column_name: str = "contact_url",
+        output_dir: str = "tmp"
+    ) -> str:
         """
         Save crawling results to CSV file with only contact URLs
-        
+
         Args:
             save_detail: If True, also save a detailed version with all columns
             column_name: Name for the contact URL column in the CSV
-            
+            output_dir: Optional output directory for the CSV
+
         Returns:
             Path to the generated CSV file
         """
         if not self.results:
             self.logger.warning("No results to save")
             return ""
-            
+
+        # Use provided output_dir if given
+        out_dir = Path(output_dir) if output_dir else self.output_dir
+        out_dir.mkdir(exist_ok=True)
+
         # Generate output filename with timestamp
         timestamp = int(time.time())
         csv_filename = f"contact_links_{timestamp}.csv"
-        output_path = self.output_dir / csv_filename
-        
+        output_path = out_dir / csv_filename
+
         # Extract just the contact URLs
         contact_urls = [result['contact_url'] for result in self.results]
-        
+
         # Create DataFrame with custom column name
         df = pd.DataFrame(contact_urls, columns=[column_name])
-        
+
         # Save to CSV without index
         df.to_csv(output_path, index=False, header=True)
-        
+
         # Only save detailed version if requested
         if save_detail:
             detail_filename = f"contact_links_detail_{timestamp}.csv"
-            detail_path = self.output_dir / detail_filename
+            detail_path = out_dir / detail_filename
             pd.DataFrame(self.results).to_csv(detail_path, index=False)
             self.logger.info(f"Detailed version saved to {detail_path}")
-        
+
         self.logger.info(f"Saved {len(contact_urls)} contact URLs to {output_path} with column name '{column_name}'")
-        
+
         return str(output_path)
 
     # =========================================================================
@@ -911,8 +921,8 @@ async def main():
     parser.add_argument(
         "--output-dir", 
         type=str,
-        default="contact_results",
-        help="Output directory for results (default: contact_results)"
+        default="tmp",
+        help="Output directory for results (default: tmp)"
     )
     parser.add_argument(
         "--detail",

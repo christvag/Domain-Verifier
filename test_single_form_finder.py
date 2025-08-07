@@ -83,7 +83,7 @@ async def main():
                     print(f"   🎲 Link confidence: {source_link.get('confidence', 0):.2f}")
 
         # Export results to JSON file for compatibility
-        results_dir = Path("contact_results")
+        results_dir = Path("tmp")
         results_dir.mkdir(exist_ok=True)
 
         timestamp = int(time.time())

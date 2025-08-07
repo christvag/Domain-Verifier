@@ -19,7 +19,7 @@ from contact_form_crawler import ContactFormCrawler
 class LimitedContactFormCrawler(ContactFormCrawler):
     """Extended crawler with result limit functionality and real-time output"""
     
-    def __init__(self, csv_file_path: str = None, output_dir: str = "contact_results", result_limit: int = None):
+    def __init__(self, csv_file_path: str = None, output_dir: str = "tmp", result_limit: int = None):
         super().__init__(csv_file_path=csv_file_path, output_dir=output_dir)
         self.result_limit = result_limit
         self.stop_crawling = False
@@ -129,7 +129,7 @@ class LimitedContactFormCrawler(ContactFormCrawler):
 
 
 async def test_crawler(csv_file: str = "live_test_sample.csv", result_limit: int = None, 
-                       output_dir: str = "contact_results", save_detail: bool = False, 
+                       output_dir: str = "tmp", save_detail: bool = False, 
                        column_name: str = "contact_url"):
     """Test the contact form crawler with the specified CSV"""
     
@@ -241,8 +241,8 @@ Examples:
     parser.add_argument(
         "--output-dir",
         type=str,
-        default="contact_results",
-        help="Output directory for results (default: contact_results)"
+        default="tmp",
+        help="Output directory for results (default: tmp)"
     )
     parser.add_argument(
         "--detail",

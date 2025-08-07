@@ -527,21 +527,18 @@ def show_past_runs():
                     # Prepare DataFrame for display
                     df_live = pd.DataFrame(contacts)
                     if not df_live.empty:
-                        # Add count column starting from 1, drop the original index
                         df_live = df_live.reset_index(drop=True)
                         df_live.insert(0, "#", range(1, len(df_live) + 1))
                         df_live = df_live[["#", "contact_url", "confidence"]]
                         df_live = df_live.rename(columns={"contact_url": "Contact Url", "confidence": "Confidence"})
-                        # Set "#" as the index to hide the default index
                         df_live = df_live.set_index("#")
                     placeholder.table(df_live)
 
                 crawler = ContactFormCrawler(
                     csv_file_path=str(tmp_csv),
-                    output_dir="contact_results"
+                    output_dir="tmp"
                 )
 
-                # Custom processing loop to show current domain in spinner
                 async def process_with_live_spinner():
                     df_domains = pd.read_csv(tmp_csv)
                     domains = df_domains["website"].tolist()
@@ -558,13 +555,22 @@ def show_past_runs():
 
                 asyncio.run(process_with_live_spinner())
 
-                # After loop, save final results to CSV
-                csv_path = crawler._save_results_to_csv(
-                    save_detail=False,
-                    column_name="contact_url"
-                )
-                st.session_state[f"contacts_csv_{run['id']}"] = csv_path
+                # After processing, save contacts to CSV in tmp with column name "website"
+                if contacts:
+                    df_contacts = pd.DataFrame([{"website": c["Contact Url"] if "Contact Url" in c else c.get("contact_url", "")} for c in contacts])
+                    csv_path = Path("tmp") / f"contact_urls_{int(time.time())}.csv"
+                    df_contacts.to_csv(csv_path, index=False)
 
+                    with open(csv_path, "rb") as f:
+                        st.download_button(
+                            label="⬇️ Download Contact URLs CSV",
+                            data=f.read(),
+                            file_name=csv_path.name,
+                            use_container_width=True,
+                            key=f"download_contacts_{run['id']}"
+                        )
+                else:
+                    st.info("No contact URLs found to download.")
 # Add this once, near the top of your file (after imports)
 st.markdown(
     """

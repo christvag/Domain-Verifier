@@ -107,7 +107,12 @@ class ContactFormCrawler:
             self.sentence_model = None
             self.classifier = None
 
-    async def crawl_csv_domains(self, save_detail: bool = False, column_name: str = "contact_url") -> str:
+    async def crawl_csv_domains(
+        self, 
+        save_detail: bool = False, 
+        column_name: str = "contact_url",
+        on_result=None  # <-- Add this
+    ) -> str:
         """
         Process all domains from CSV file and output results as CSV
         
@@ -139,24 +144,20 @@ class ContactFormCrawler:
             domain = domain.strip()
             if not domain:
                 continue
-                
+
             self.logger.info(f"[{i}/{len(domains)}] Processing: {domain}")
-            
+
             try:
-                # Process domain with semaphore to limit concurrency
                 async with semaphore:
                     contact_urls = await self._crawl_single_domain(domain)
-                    
-                    # Store results
                     for url in contact_urls:
                         self.results.append(url)
-                        
+                        if on_result:
+                            on_result(url)  # <-- Call the callback for each result
                     self.logger.info(f"✅ Found {len(contact_urls)} contact URLs for {domain}")
-                    
             except Exception as e:
                 self.logger.error(f"Error processing {domain}: {str(e)}")
-                
-            # Progress update
+
             self.logger.info(f"📊 Progress: {i}/{len(domains)} domains processed, {len(self.results)} total contact URLs found")
             
         # Save results to CSV with custom column name

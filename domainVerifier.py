@@ -420,7 +420,7 @@ else:
 # --- Display Past Runs ---
 @st.fragment
 def show_past_runs():
-    """Displays a table of past runs with a manual refresh button."""
+    """Displays a table of past runs with a manual refresh and 'Process Reachables' button."""
     st.markdown("---")
     st.subheader("Past Runs")
 
@@ -436,41 +436,148 @@ def show_past_runs():
 
     if not past_runs:
         st.info("No past runs found. Complete a verification to see history here.")
-    else:
-        cols = st.columns((2, 1, 1, 1, 1, 1))
-        headers = [
-            "File Processed",
-            "Processing Time",
-            "Reachable",
-            "Unreachable",
-            "Reachable File",
-            "Full Report",
-        ]
-        for col, header in zip(cols, headers):
-            col.write(f"**{header}**")
+        return
 
-        for run in past_runs:
-            cols = st.columns((2, 1, 1, 1, 1, 1))
-            cols[0].write(run["filename"])
-            cols[1].write(f"{run['processing_time']:.2f}s")
-            cols[2].write(f"✔️ {run['reachable_count']}")
-            cols[3].write(f"❌ {run['unreachable_count']}")
+    # add new column header
+    cols = st.columns((2, 1, 1, 1, 1, 1, 1))
+    headers = [
+        "File Processed",
+        "Processing Time",
+        "Reachable",
+        "Unreachable",
+        "Reachable File",
+        "Full Report",
+        "Process Reachables",
+    ]
+    for col, hdr in zip(cols, headers):
+        col.write(f"**{hdr}**")
 
-            with open(run["reachable_filepath"], "rb") as f:
-                cols[4].download_button(
-                    "⬇️",
-                    f.read(),
-                    file_name=Path(run["reachable_filepath"]).name,
-                    key=f"reachable_{run['id']}",
+    for run in past_runs:
+        cols = st.columns((2, 1, 1, 1, 1, 1, 1))
+        cols[0].write(run["filename"])
+        cols[1].write(f"{run['processing_time']:.2f}s")
+        cols[2].write(f"✔️ {run['reachable_count']}")
+        cols[3].write(f"❌ {run['unreachable_count']}")
+
+        with open(run["reachable_filepath"], "rb") as f:
+            cols[4].download_button(
+                "⬇️",
+                f.read(),
+                file_name=Path(run["reachable_filepath"]).name,
+                key=f"reachable_{run['id']}",
+            )
+
+        with open(run["report_filepath"], "rb") as f:
+            cols[5].download_button(
+                "⬇️",
+                f.read(),
+                file_name=Path(run["report_filepath"]).name,
+                key=f"report_{run['id']}",
+            )
+
+        # --- Persist expander state ---
+        expander_key = f"expander_{run['id']}"
+        limit_key = f"limit_{run['id']}"
+        if expander_key not in st.session_state:
+            st.session_state[expander_key] = False
+        if limit_key not in st.session_state:
+            st.session_state[limit_key] = min(10, run['reachable_count'])
+
+        process_key = f"process_{run['id']}"
+        if cols[6].button("🔍", key=process_key):
+            st.session_state[expander_key] = True
+
+        # --- Expander with persistent state ---
+        with st.expander(f"Process Reachables for {run['filename']}", expanded=st.session_state[expander_key]):
+            import pandas as pd
+
+            df_reach = pd.read_csv(run["reachable_filepath"])
+            max_lim = len(df_reach)
+
+            # Number input with on_change to keep expander open
+            def keep_expander_open():
+                st.session_state[expander_key] = True
+
+            limit = st.number_input(
+                "Max domains to process",
+                min_value=1,
+                max_value=max_lim,
+                value=st.session_state[limit_key],
+                key=limit_key,
+                on_change=keep_expander_open
+            )
+
+            # Start button
+            start_key = f"start_{run['id']}"
+            if st.button("Start", key=start_key):
+                st.session_state[expander_key] = True  # Keep open after start
+
+                # Prepare temp CSV with limited domains
+                tmp_dir = Path("tmp")
+                tmp_dir.mkdir(exist_ok=True)
+                tmp_csv = tmp_dir / f"reachable_{run['id']}_limited.csv"
+                df_reach.head(st.session_state[limit_key]).to_csv(tmp_csv, index=False)
+
+                contacts = []
+                placeholder = st.empty()
+
+                def on_result(new_url):
+                    contacts.append(new_url)
+                    st.session_state[f"contacts_{run['id']}"] = contacts.copy()
+                    # Prepare DataFrame for display
+                    df_live = pd.DataFrame(contacts)
+                    if not df_live.empty:
+                        # Add count column starting from 1, drop the original index
+                        df_live = df_live.reset_index(drop=True)
+                        df_live.insert(0, "#", range(1, len(df_live) + 1))
+                        df_live = df_live[["#", "contact_url", "confidence"]]
+                        df_live = df_live.rename(columns={"contact_url": "Contact Url", "confidence": "Confidence"})
+                        # Set "#" as the index to hide the default index
+                        df_live = df_live.set_index("#")
+                    placeholder.table(df_live)
+
+                crawler = ContactFormCrawler(
+                    csv_file_path=str(tmp_csv),
+                    output_dir="contact_results"
                 )
 
-            with open(run["report_filepath"], "rb") as f:
-                cols[5].download_button(
-                    "⬇️",
-                    f.read(),
-                    file_name=Path(run["report_filepath"]).name,
-                    key=f"report_{run['id']}",
+                # Custom processing loop to show current domain in spinner
+                async def process_with_live_spinner():
+                    df_domains = pd.read_csv(tmp_csv)
+                    domains = df_domains["website"].tolist()
+                    semaphore = asyncio.Semaphore(5)
+                    for i, domain in enumerate(domains, 1):
+                        domain = domain.strip()
+                        if not domain:
+                            continue
+                        with st.spinner(f"Processing | {domain}"):
+                            contact_urls = await crawler._crawl_single_domain(domain)
+                            for url in contact_urls:
+                                if on_result:
+                                    on_result(url)
+
+                asyncio.run(process_with_live_spinner())
+
+                # After loop, save final results to CSV
+                csv_path = crawler._save_results_to_csv(
+                    save_detail=False,
+                    column_name="contact_url"
                 )
+                st.session_state[f"contacts_csv_{run['id']}"] = csv_path
 
+# Add this once, near the top of your file (after imports)
+st.markdown(
+    """
+    <style>
+    /* Hide first column (index) in all Streamlit tables */
+    .stDataFrame thead tr th:first-child,
+    .stDataFrame tbody tr td:first-child {
+        display: none;
+    }
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
 
+# --- Display Past Runs ---
 show_past_runs()

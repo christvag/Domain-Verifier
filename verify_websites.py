@@ -172,14 +172,7 @@ async def verify_domains(
 
     def log_progress(pass_name, current, total, stage):
         percent = int((current / total) * 100) if total > 0 else 0
-        logger.progress(
-            f"{stage} ({current}/{total})",
-            pass_=pass_name,
-            current=current,
-            total=total,
-            percent=percent,
-            stage=stage,
-        )
+        logger.progress(f"{stage} ({current}/{total})", percent)
 
     def log_info(message):
         """Helper function to log info messages"""

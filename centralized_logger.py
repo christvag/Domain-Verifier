@@ -12,9 +12,9 @@ Features:
 - Integration with Streamlit session state
 """
 
+from __future__ import annotations
 import threading
 import time
-from collections import deque
 from typing import Optional, List, Dict, Any
 from enum import Enum
 from dataclasses import dataclass
@@ -51,7 +51,7 @@ class LogEntry:
             return f"[{time_str}] {self.level.value}: {self.message}"
 
 
-class CentralizedLogger:
+class _CentralLogger:
     """
     Thread-safe centralized logger for the Domain Verifier application.
 
@@ -73,9 +73,9 @@ class CentralizedLogger:
         """
         self.name = name
         self.max_entries = max_entries
-        self._logs = deque(maxlen=max_entries)
+        self._logs: List[str] = []
+        self._latest_progress = {"stage": "", "percent": 0}
         self._lock = threading.RLock()
-        self._progress_info = {}
 
         # Initialize Python logger
         self._logger = logging.getLogger(name)
@@ -87,42 +87,24 @@ class CentralizedLogger:
             self._logger.addHandler(handler)
         self._logger.setLevel(logging.INFO)
 
-    def _add_entry(
-        self, level: LogLevel, message: str, context: Optional[Dict[str, Any]] = None
-    ):
-        """Thread-safe method to add a log entry"""
-        entry = LogEntry(
-            timestamp=time.time(), level=level, message=message, context=context or {}
-        )
-
+    def log(self, msg: str):
+        """Thread-safe method to add a log message"""
         with self._lock:
-            self._logs.append(entry)
+            self._logs.append(msg)
 
-            # Update progress info if this is a progress entry
-            if level == LogLevel.PROGRESS and context:
-                self._progress_info.update(context)
+    def info(self, msg: str):
+        """Log an informational message"""
+        self.log(f"[INFO] {msg}")
 
-    def debug(self, message: str, **context):
-        """Log a debug message"""
-        self._add_entry(LogLevel.DEBUG, message, context)
-        self._logger.debug(message, extra=context)
-
-    def info(self, message: str, **context):
-        """Log an info message"""
-        self._add_entry(LogLevel.INFO, message, context)
-        self._logger.info(message, extra=context)
-
-    def warning(self, message: str, **context):
+    def warning(self, msg: str):
         """Log a warning message"""
-        self._add_entry(LogLevel.WARNING, message, context)
-        self._logger.warning(message, extra=context)
+        self.log(f"[WARNING] {msg}")
 
-    def error(self, message: str, **context):
+    def error(self, msg: str):
         """Log an error message"""
-        self._add_entry(LogLevel.ERROR, message, context)
-        self._logger.error(message, extra=context)
+        self.log(f"[ERROR] {msg}")
 
-    def progress(self, message: str, **context):
+    def progress(self, stage: str, percent: int):
         """
         Log a progress update with structured context.
 
@@ -133,115 +115,37 @@ class CentralizedLogger:
         - percent: Completion percentage
         - stage: Current stage description
         """
-        self._add_entry(LogLevel.PROGRESS, message, context)
-
-    def get_logs(
-        self, level_filter: Optional[LogLevel] = None, last_n: Optional[int] = None
-    ) -> List[LogEntry]:
-        """
-        Get log entries with optional filtering.
-
-        Args:
-            level_filter: Only return logs of this level
-            last_n: Only return the last N entries
-
-        Returns:
-            List of log entries
-        """
         with self._lock:
-            logs = list(self._logs)
+            self._latest_progress = {"stage": stage, "percent": percent}
+            self._logs.append(f"[{percent}%] {stage}")
 
-        if level_filter:
-            logs = [log for log in logs if log.level == level_filter]
-
-        if last_n:
-            logs = logs[-last_n:]
-
-        return logs
-
-    def get_logs_as_text(
-        self, level_filter: Optional[LogLevel] = None, last_n: Optional[int] = None
-    ) -> str:
-        """Get logs formatted as text string"""
-        logs = self.get_logs(level_filter, last_n)
-        return "\n".join(str(log) for log in logs)
-
-    def get_latest_progress(self) -> Optional[Dict[str, Any]]:
+    def get_latest_progress(self):
         """Get the latest progress information"""
         with self._lock:
-            return self._progress_info.copy() if self._progress_info else None
+            return dict(self._latest_progress)
+
+    def get_logs_as_text(self, last_n: Optional[int] = None) -> str:
+        """Get logs formatted as text string"""
+        with self._lock:
+            logs = self._logs[-last_n:] if last_n else self._logs[:]
+            return "\n".join(logs)
 
     def clear(self):
         """Clear all logs and progress info"""
         with self._lock:
             self._logs.clear()
-            self._progress_info.clear()
-
-    def get_stats(self) -> Dict[str, int]:
-        """Get logging statistics"""
-        with self._lock:
-            logs = list(self._logs)
-
-        stats = {level.value: 0 for level in LogLevel}
-        for log in logs:
-            stats[log.level.value] += 1
-
-        stats["total"] = len(logs)
-        return stats
-
-    def setLevel(self, level):
-        """Set the logging level"""
-        self._logger.setLevel(level)
+            self._latest_progress = {"stage": "", "percent": 0}
 
 
-# Global logger instance
-_global_logger: Optional[CentralizedLogger] = None
-_logger_lock = threading.Lock()
+_singleton: Optional[_CentralLogger] = None
 
 
-def get_logger() -> CentralizedLogger:
+def get_logger() -> _CentralLogger:
     """Get the global logger instance (singleton pattern)"""
-    global _global_logger
-
-    if _global_logger is None:
-        with _logger_lock:
-            if _global_logger is None:
-                _global_logger = CentralizedLogger()
-
-    return _global_logger
-
-
-def reset_logger():
-    """Reset the global logger (useful for testing)"""
-    global _global_logger
-    with _logger_lock:
-        _global_logger = None
-
-
-# Convenience functions for direct logging
-def debug(message: str, **context):
-    """Log a debug message using the global logger"""
-    get_logger().debug(message, **context)
-
-
-def info(message: str, **context):
-    """Log an info message using the global logger"""
-    get_logger().info(message, **context)
-
-
-def warning(message: str, **context):
-    """Log a warning message using the global logger"""
-    get_logger().warning(message, **context)
-
-
-def error(message: str, **context):
-    """Log an error message using the global logger"""
-    get_logger().error(message, **context)
-
-
-def progress(message: str, **context):
-    """Log a progress update using the global logger"""
-    get_logger().progress(message, **context)
+    global _singleton
+    if _singleton is None:
+        _singleton = _CentralLogger()
+    return _singleton
 
 
 # Example usage and testing
@@ -253,20 +157,16 @@ if __name__ == "__main__":
         logger = get_logger()
 
         # Test basic logging
-        logger.info("Starting test")
-        logger.debug("Debug message", test_param="debug_value")
-        logger.warning("Warning message", category="test")
-        logger.error("Error message", error_code=500)
+        logger.log("Starting test")
+        logger.log("Debug message: test_param=debug_value")
+        logger.log("Warning message: category=test")
+        logger.log("Error message: error_code=500")
 
         # Test progress logging
         for i in range(5):
             logger.progress(
-                f"Processing item {i+1}",
-                pass_="test_pass",
-                current=i + 1,
-                total=5,
-                percent=int((i + 1) / 5 * 100),
                 stage=f"Testing item {i+1}",
+                percent=int((i + 1) / 5 * 100),
             )
             await asyncio.sleep(0.1)
 
@@ -279,9 +179,6 @@ if __name__ == "__main__":
 
         print("\n=== Latest Progress ===")
         print(logger.get_latest_progress())
-
-        print("\n=== Stats ===")
-        print(logger.get_stats())
 
     # Run test
     asyncio.run(test_logger())

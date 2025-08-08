@@ -5,10 +5,18 @@ import pandas as pd
 import asyncio
 import threading
 from pathlib import Path
+import datetime
 
-from database_manager import initialize_db, fetch_past_runs, clear_db
+from database_manager import (
+    initialize_db,
+    fetch_past_runs,
+    clear_db,
+    fetch_process_runs,
+    DB_PATH,  # add this
+)
 from contact_form_crawler import ContactFormCrawler
 from centralized_logger import get_logger
+from fast_contact_crawler import crawl_from_csv
 
 # --- Page and State Setup ---
 st.set_page_config(page_title="Domain Verifier", layout="centered")
@@ -84,7 +92,7 @@ def check_if_stopped():
     return "PROCESS_STOPPED_BY_USER" in logs
 
 
-def run_verification_in_thread(file_path, retries, column_name):
+def run_verification_in_thread(file_path, num_times, column_name):
     """
     Wrapper function to run the asyncio domain verification in a thread.
     This thread's ONLY job is to do work and set a completion flag.
@@ -103,16 +111,14 @@ def run_verification_in_thread(file_path, retries, column_name):
                 verify_domains(
                     file_path,
                     start_time=start_time,
-                    retries=retries,
+                    retries=num_times,
                     column=column_name,
                     logger=logger,
                 )
             )
             st.session_state.reachable_df = reachable_df
             st.session_state.verification_error = None
-            print(
-                "[DEBUG] Background thread completed successfully. Setting completion flag..."
-            )
+            print("[DEBUG] Background thread completed successfully. Setting completion flag...")
 
             # If contact crawling is enabled, start it now
             if st.session_state.enable_contact_crawling and reachable_df is not None:
@@ -126,7 +132,7 @@ def run_verification_in_thread(file_path, retries, column_name):
         finally:
             st.session_state.verification_complete_flag = True
             st.session_state.completion_timestamp = time.time()
-            completion_file.touch()  # Create file signal
+            completion_file.touch()
             print(
                 f"[DEBUG] Background thread finished. Completion flag set at {st.session_state.completion_timestamp}"
             )
@@ -415,8 +421,6 @@ else:
     # Initial state
     st.markdown("---")
     st.info("Start a process to see live updates.")
-
-
 # --- Display Past Runs ---
 @st.fragment
 def show_past_runs():
@@ -439,7 +443,7 @@ def show_past_runs():
         return
 
     # add new column header
-    cols = st.columns((2, 1, 1, 1, 1, 1))  # was (2, 1, 1, 1, 1, 1, 1)
+    cols = st.columns((2, 1, 1, 1, 1, 1))
     headers = [
         "File Processed",
         "Processing Time",
@@ -452,35 +456,52 @@ def show_past_runs():
         col.write(f"**{hdr}**")
 
     for run in past_runs:
-        cols = st.columns((2, 1, 1, 1, 1, 1))  # was (2, 1, 1, 1, 1, 1, 1)
+        cols = st.columns((2, 1, 1, 1, 1, 1))
         cols[0].write(run["filename"])
         cols[1].write(f"{run['processing_time']:.2f}s")
         cols[2].write(f"✔️ {run['reachable_count']}")
         cols[3].write(f"❌ {run['unreachable_count']}")
 
-        with open(run["reachable_filepath"], "rb") as f:
-            cols[4].download_button(
-                "⬇️",
-                f.read(),
-                file_name=Path(run["reachable_filepath"]).name,
-                key=f"reachable_{run['id']}",
-            )
+        # --- helper to render download + inline view (CSV) ---
+        def _csv_cell(col, file_path: str, dl_key: str, view_key: str, max_rows: int = 200):
+            import pandas as _pd
+            from pathlib import Path as _P
+            cdl, cview = col.columns([1, 1])
+            try:
+                with open(file_path, "rb") as f:
+                    cdl.download_button(
+                        "⬇️",
+                        f.read(),
+                        file_name=_P(file_path).name,
+                        key=dl_key,
+                        use_container_width=True,
+                    )
+            except Exception:
+                cdl.warning("Missing")
+                return
+            # Eye-only popover (no key, no extra label)
+            with cview.popover("👁️", help=_P(file_path).name):
+                try:
+                    df_preview = _pd.read_csv(file_path, nrows=max_rows)
+                    st.caption(f"Preview (first {len(df_preview)} rows)")
+                    st.dataframe(df_preview, use_container_width=True, height=350)
+                except Exception as e:
+                    st.warning(f"Could not preview CSV: {e}")
 
-        with open(run["report_filepath"], "rb") as f:
-            cols[5].download_button(
-                "⬇️",
-                f.read(),
-                file_name=Path(run["report_filepath"]).name,
-                key=f"report_{run['id']}",
-            )
+        # Reachable CSV + inline view
+        _csv_cell(cols[4], run["reachable_filepath"], f"reachable_{run['id']}", f"reachable_view_{run['id']}")
+
+        # Full report CSV + inline view
+        _csv_cell(cols[5], run["report_filepath"], f"report_{run['id']}", f"report_view_{run['id']}")
 
         # --- Persist expander state ---
         expander_key = f"expander_{run['id']}"
         limit_key = f"limit_{run['id']}"
         if expander_key not in st.session_state:
             st.session_state[expander_key] = False
-        if limit_key not in st.session_state:
-            st.session_state[limit_key] = min(10, run['reachable_count'])
+        # REMOVE this block to avoid the warning:
+        # if limit_key not in st.session_state:
+        #     st.session_state[limit_key] = min(10, run['reachable_count'])
 
         # Always show the expander for each run (no button needed)
         with st.expander(f"Process Reachables for {run['filename']}", expanded=st.session_state[expander_key]):
@@ -509,7 +530,7 @@ def show_past_runs():
                     f"Max domains to process out of {run['reachable_count']}",
                     min_value=1,
                     max_value=max_lim,
-                    value=st.session_state[limit_key],
+                    value=min(10, run['reachable_count']),  # Use default here
                     key=limit_key,
                     on_change=keep_expander_open
                 )
@@ -527,67 +548,211 @@ def show_past_runs():
 
                 contacts = []
                 placeholder = st.empty()
-
                 progress_placeholder = st.empty()
 
-                def on_result(new_url):
-                    contacts.append(new_url)
-                    st.session_state[f"contacts_{run['id']}"] = contacts.copy()
-                    processed = len(contacts)
-                    total = run['reachable_count']
-                    percent = round(float((processed / total) * 100),1)
-                    progress_placeholder.progress(
-                        processed / total,
-                        text=f"Found {processed} out of {total} Reachable Domains ({percent}%)"
-                    )
-                    # Prepare DataFrame for display
+                # Build live UI callbacks
+                # Stream a row as it's found
+                def on_contact_cb(row: dict):
+                    contacts.append({
+                        "contact_url": row.get("contact_url"),
+                        "confidence": row.get("confidence", 0.7),
+                    })
                     df_live = pd.DataFrame(contacts)
                     if not df_live.empty:
                         df_live = df_live.reset_index(drop=True)
                         df_live.insert(0, "#", range(1, len(df_live) + 1))
-                        df_live = df_live[["#", "contact_url", "confidence"]]
-                        df_live = df_live.rename(columns={"contact_url": "Contact Url", "confidence": "Confidence"})
-                        df_live = df_live.set_index("#")
+                        df_live = df_live[["#", "contact_url", "confidence"]].set_index("#")
                     placeholder.table(df_live)
 
-                crawler = ContactFormCrawler(
-                    csv_file_path=str(tmp_csv),
-                    output_dir="tmp"
-                )
+                # Update progress when a domain finishes
+                def on_progress_cb(processed: int, total: int, last_domain: str):
+                    percent = round((processed / max(total, 1)) * 100, 1)
+                    progress_placeholder.progress(
+                        processed / max(total, 1),
+                        text=f"Processed {processed}/{total} domains ({percent}%) • Last: {last_domain}"
+                    )
 
                 async def process_with_live_spinner():
-                    df_domains = pd.read_csv(tmp_csv)
-                    domains = df_domains["website"].tolist()
-                    semaphore = asyncio.Semaphore(5)
-                    for i, domain in enumerate(domains, 1):
-                        domain = domain.strip()
-                        if not domain:
-                            continue
-                        with st.spinner(f"Processing | {domain}"):
-                            contact_urls = await crawler._crawl_single_domain(domain)
-                            for url in contact_urls:
-                                if on_result:
-                                    on_result(url)
+                    start_time = time.time()
+                    output_csv, run_metrics, metrics_json_path = await crawl_from_csv(
+                        csv_file_path=str(tmp_csv),
+                        website_col="website",
+                        output_dir="tmp",
+                        concurrency=100,
+                        headless=True,
+                        on_contact=on_contact_cb,
+                        on_progress=on_progress_cb,
+                    )
+                    # Compute summary after run completes
+                    df_contacts = pd.read_csv(output_csv) if Path(output_csv).exists() else pd.DataFrame(columns=["domain","contact_url","confidence"])
+                    total_domains = len(pd.read_csv(tmp_csv))
+                    unique_domains_found = df_contacts["domain"].nunique() if not df_contacts.empty and "domain" in df_contacts.columns else 0
+                    process_success_percent = round((unique_domains_found / total_domains) * 100, 1) if total_domains else 0
+                    processing_time = time.time() - start_time
+                    processed_contact_urls_csv_path = Path(output_csv)
+                    return contacts, processed_contact_urls_csv_path, process_success_percent, processing_time, Path(metrics_json_path)
 
-                asyncio.run(process_with_live_spinner())
+                # Run and get results (UI has been updating during the crawl)
+                contacts, processed_contact_urls_csv_path, process_success_percent, processing_time, metrics_json_path = asyncio.run(process_with_live_spinner())
 
-                # After processing, save contacts to CSV in tmp with column name "website"
-                if contacts:
-                    df_contacts = pd.DataFrame([{"website": c["Contact Url"] if "Contact Url" in c else c.get("contact_url", "")} for c in contacts])
-                    csv_path = Path("tmp") / f"contact_urls_{int(time.time())}.csv"
-                    df_contacts.to_csv(csv_path, index=False)
-
-                    with open(csv_path, "rb") as f:
+                # Save to database and offer download if contacts found
+                if contacts and processed_contact_urls_csv_path:
+                    from database_manager import save_process_run_to_db
+                    save_process_run_to_db(
+                        original_filename=run["filename"],
+                        reachable_filepath=run["reachable_filepath"],
+                        contact_forms_filepath=str(processed_contact_urls_csv_path),
+                        success_rate=process_success_percent,
+                        processing_time=processing_time,
+                        metrics_json_filepath=str(metrics_json_path)
+                    )
+                    # Full rerun so the "Past Process Runs" table updates immediately
+                    # st.rerun()
+                    with open(processed_contact_urls_csv_path, "rb") as f:
                         st.download_button(
                             label="⬇️ Download Contact URLs CSV",
                             data=f.read(),
-                            file_name=csv_path.name,
+                            file_name=processed_contact_urls_csv_path.name,
                             use_container_width=True,
                             key=f"download_contacts_{run['id']}"
                         )
                 else:
                     st.info("No contact URLs found to download.")
-# Add this once, near the top of your file (after imports)
+
+# --- Display Past Process Runs ---
+@st.fragment
+def show_past_process_runs():
+    """Displays a table of past process runs (contact form discovery) with refresh and clear buttons."""
+    st.markdown("---")
+    st.subheader("Past Process Runs")
+
+    process_refresh_btn, process_clear_btn = st.columns(2)
+    with process_refresh_btn:
+        if st.button("🔄 Refresh Process History"):
+            st.rerun()  # full rerun; fragment-only refresh is not supported
+    with process_clear_btn:
+        if st.button("🧹 Clear Process History", on_click=clear_db):
+            st.rerun()
+
+    process_runs = fetch_process_runs()
+
+    if not process_runs:
+        st.info("No past process runs found. Run a contact form process to see history here.")
+        return
+
+    # Table headers (added Metrics JSON)
+    cols = st.columns((2, 2, 2, 2, 1, 1, 2))
+    headers = [
+        "Original File",
+        "Reachable CSV",
+        "Found Forms CSV",
+        "Metrics JSON",
+        "Success Rate (%)",
+        "Time Taken (s)",
+        "Date of Run"
+    ]
+    for col, hdr in zip(cols, headers):
+        col.write(f"**{hdr}**")
+
+    # --- helpers for inline view ---
+    def _csv_cell(col, file_path: str, dl_key: str, view_key: str, max_rows: int = 200):
+        import pandas as _pd
+        from pathlib import Path as _P
+        cdl, cview = col.columns([1, 1])
+        try:
+            with open(file_path, "rb") as f:
+                cdl.download_button(
+                    "⬇️",
+                    f.read(),
+                    file_name=_P(file_path).name,
+                    key=dl_key,
+                    use_container_width=True,
+                )
+        except Exception:
+            cdl.warning("Missing")
+            return
+        with cview.popover("👁️", help=_P(file_path).name):
+            try:
+                df_preview = _pd.read_csv(file_path, nrows=max_rows)
+                st.caption(f"Preview (first {len(df_preview)} rows)")
+                st.dataframe(df_preview, use_container_width=True, height=350)
+            except Exception as e:
+                st.warning(f"Could not preview CSV: {e}")
+
+    def _json_cell(col, file_path: str | None, dl_key: str, view_key: str):
+        import json as _json
+        from pathlib import Path as _P
+        cdl, cview = col.columns([1, 1])
+        if not file_path:
+            cdl.write("-")
+            return
+        try:
+            with open(file_path, "rb") as f:
+                cdl.download_button(
+                    "⬇️",
+                    f.read(),
+                    file_name=_P(file_path).name,
+                    key=dl_key,
+                    use_container_width=True,
+                )
+        except Exception:
+            cdl.warning("Missing")
+            return
+        with cview.popover("👁️", help=_P(file_path).name):
+            try:
+                with open(file_path, "r", encoding="utf-8") as jf:
+                    data = _json.load(jf)
+                st.caption("Metrics JSON (collapsible sections below)")
+                if isinstance(data, dict) and "summary" in data:
+                    st.subheader("Summary")
+                    st.json(data["summary"], expanded=False)
+                st.subheader("Full JSON")
+                st.json(data, expanded=False)
+            except Exception as e:
+                st.warning(f"Could not preview JSON: {e}")
+
+    for proc in process_runs:
+        cols = st.columns((2, 2, 2, 2, 1, 1, 2))
+        cols[0].write(proc["original_filename"])
+
+        _csv_cell(
+            cols[1],
+            proc["reachable_filepath"],
+            f"proc_reachable_{proc['id']}",
+            f"proc_reachable_view_{proc['id']}",
+        )
+        _csv_cell(
+            cols[2],
+            proc["contact_forms_filepath"],
+            f"proc_forms_{proc['id']}",
+            f"proc_forms_view_{proc['id']}",
+        )
+
+        # sqlite3.Row -> no .get(); use mapping access safely
+        metrics_path = proc["metrics_json_filepath"] if "metrics_json_filepath" in proc.keys() else None
+        _json_cell(
+            cols[3],
+            metrics_path,
+            f"proc_metrics_{proc['id']}",
+            f"proc_metrics_view_{proc['id']}",
+        )
+
+        cols[4].write(f"{proc['success_rate']:.1f}")
+        cols[5].write(f"{proc['processing_time']:.2f}")
+
+        # Date of Run
+        dt = proc["timestamp"]
+        try:
+            import datetime as _dt
+            if isinstance(dt, str):
+                dt_obj = _dt.datetime.fromisoformat(dt)
+            else:
+                dt_obj = _dt.datetime.fromtimestamp(dt)
+            cols[6].write(dt_obj.strftime("%Y-%m-%d %H:%M:%S"))
+        except Exception:
+            cols[6].write(str(dt))
+
+# --- Custom Styles for UI ---
 st.markdown(
     """
     <style>
@@ -596,18 +761,93 @@ st.markdown(
     .stDataFrame tbody tr td:first-child {
         display: none;
     }
-    </style>
-    """,
-    unsafe_allow_html=True,
-)
-
-# Add this CSS once after your other st.markdown CSS:
-st.markdown(
-    """
-    <style>
     .all-btn-align {
-        margin-top: 28px !important;  /* Adjust this value as needed for your theme */
+        margin-top: 28px !important;
         width: 100%;
+    }
+    /* Eye-only: hide the chevron/caret that Streamlit adds to popover triggers */
+    [data-testid="stPopoverButton"] svg { display: none !important; }
+    [data-testid="stPopover"] button svg { display: none !important; }
+    /* Icon buttons (download + view) look like compact pills */
+    .stButton > button {
+        padding: 0.35rem 0.55rem !important;
+        border-radius: 10px !important;
+        min-width: 42px; height: 42px;
+        display: inline-flex; align-items: center; justify-content: center;
+        border: 1px solid var(--border-color, rgba(255,255,255,.1));
+        background: var(--secondary-bg, rgba(255,255,255, .04));
+        transition: background 0.15s, border 0.15s;
+    }
+    .stButton > button:hover {
+        background: var(--primary-color, #444) !important;
+        border-color: var(--primary-color, #888) !important;
+    }
+    /* Make the two controls sit closer together */
+    [data-testid="column"] > div:has(.stButton),
+    [data-testid="column"] > div:has([data-testid="stPopoverButton"]) {
+        display: inline-flex; gap: .5rem; align-items: center;
+    }
+    /* Popover panel: wider, scrollable content */
+    [data-testid="stPopoverContent"] {
+        width: min(90vw, 920px) !important;
+        max-height: 70vh !important;
+        overflow: auto !important;
+        padding: 0.5rem 0.75rem !important;
+        border-radius: 12px !important;
+        border: 1px solid var(--border-color, rgba(255,255,255,.1));
+        background: var(--bg-elev, rgba(0,0,0,.6));
+        backdrop-filter: blur(4px);
+    }
+    /* Nice table look for previews */
+    .stMarkdown + .stDataFrame, .stCaption + .stDataFrame {
+        border-radius: 10px; overflow: hidden;
+    }
+    .stDataFrame [data-testid="StyledDataFrame"] {
+        border: 1px solid var(--border-color, rgba(255,255,255,.1));
+        border-radius: 10px;
+    }
+    .stCaption, .stMarkdown caption { opacity: .8; }
+
+    /* --- Custom table styling for summary tables --- */
+    .block-container .stFragment > div > div > div > div > div {
+        /* Target the main table container for Past Runs/Process Runs */
+        border-radius: 14px;
+        overflow: hidden;
+        background: rgba(255,255,255,0.01);
+        box-shadow: 0 2px 12px 0 rgba(0,0,0,0.07);
+    }
+    .stFragment .stColumns {
+        margin-bottom: 0.2rem !important;
+    }
+    .stFragment .stColumn > div {
+        padding: 0.4rem 0.5rem !important;
+        border-radius: 8px;
+        font-size: 1.01rem;
+        background: transparent;
+        transition: background 0.15s;
+    }
+    .stFragment .stColumn > div:hover {
+        background: rgba(255,255,255,0.04);
+    }
+    .stFragment .stColumn > div {
+        border-bottom: 1px solid rgba(255,255,255,0.04);
+    }
+    .stFragment .stColumns:first-child .stColumn > div {
+        font-weight: 700;
+        background: rgba(255,255,255,0.04);
+        color: #fff;
+        border-bottom: 2px solid var(--primary-color, #888);
+        font-size: 1.08rem;
+        letter-spacing: 0.01em;
+    }
+    /* Zebra striping for rows */
+    .stFragment .stColumns:nth-child(even) .stColumn > div {
+        background: rgba(255,255,255,0.015);
+    }
+    /* Reduce vertical spacing between rows */
+    .stFragment .stColumns {
+        margin-top: 0 !important;
+        margin-bottom: 0 !important;
     }
     </style>
     """,
@@ -616,3 +856,6 @@ st.markdown(
 
 # --- Display Past Runs ---
 show_past_runs()
+
+# --- Show Past Process Runs ---
+show_past_process_runs()

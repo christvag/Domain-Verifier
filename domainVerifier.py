@@ -5,8 +5,15 @@ import pandas as pd
 import asyncio
 import threading
 from pathlib import Path
+import sqlite3  # Make sure this is imported at the top if not already
+import datetime
 
-from database_manager import initialize_db, fetch_past_runs, clear_db
+from database_manager import (
+    initialize_db,
+    fetch_past_runs,
+    clear_db,
+    fetch_process_runs,
+)
 from contact_form_crawler import ContactFormCrawler
 from centralized_logger import get_logger
 
@@ -593,7 +600,7 @@ def show_past_runs():
                         success_rate=process_success_percent,
                         processing_time=processing_time
                     )
-
+                    st.rerun()
                     with open(processed_contact_urls_csv_path, "rb") as f:
                         st.download_button(
                             label="⬇️ Download Contact URLs CSV",
@@ -604,6 +611,66 @@ def show_past_runs():
                         )
                 else:
                     st.info("No contact URLs found to download.")
+    
+    # --- Display Past Process Runs ---
+@st.fragment
+def show_past_process_runs():
+    """Displays a table of past process runs (contact form discovery) with refresh and clear buttons."""
+    st.markdown("---")
+    st.subheader("Past Process Runs")
+
+    process_refresh_btn, process_clear_btn = st.columns(2)
+    with process_refresh_btn:
+        if st.button("🔄 Refresh Process History"):
+            st.rerun(scope="fragment")
+    with process_clear_btn:
+        if st.button("🧹 Clear Process History", on_click=clear_db):
+            st.rerun(scope="fragment")
+
+    process_runs = fetch_process_runs()
+
+    if not process_runs:
+        st.info("No past process runs found. Run a contact form process to see history here.")
+        return
+
+    # Table headers
+    cols = st.columns((2, 2, 2, 1, 1, 2))
+    headers = [
+        "Original File",
+        "Reachable CSV",
+        "Found Forms CSV",
+        "Success Rate (%)",
+        "Time Taken (s)",
+        "Date of Run"
+    ]
+    for col, hdr in zip(cols, headers):
+        col.write(f"**{hdr}**")
+
+    for proc in process_runs:
+        cols = st.columns((2, 2, 2, 1, 1, 2))
+        cols[0].write(proc["original_filename"])
+        with open(proc["reachable_filepath"], "rb") as f:
+            cols[1].download_button(
+                "⬇️",
+                f.read(),
+                file_name=Path(proc["reachable_filepath"]).name,
+                key=f"proc_reachable_{proc['id']}",
+            )
+        with open(proc["contact_forms_filepath"], "rb") as f:
+            cols[2].download_button(
+                "⬇️",
+                f.read(),
+                file_name=Path(proc["contact_forms_filepath"]).name,
+                key=f"proc_forms_{proc['id']}",
+            )
+        cols[3].write(f"{proc['success_rate']:.1f}")
+        cols[4].write(f"{proc['processing_time']:.2f}")
+        # Format timestamp
+        dt = proc["timestamp"]
+        if isinstance(dt, str):
+            dt = datetime.datetime.fromisoformat(dt)
+        cols[5].write(dt.strftime("%Y-%m-%d %H:%M:%S"))
+
 # Add this once, near the top of your file (after imports)
 st.markdown(
     """
@@ -633,3 +700,6 @@ st.markdown(
 
 # --- Display Past Runs ---
 show_past_runs()
+
+# --- Show Past Process Runs ---
+show_past_process_runs()

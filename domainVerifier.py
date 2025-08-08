@@ -5,8 +5,14 @@ import pandas as pd
 import asyncio
 import threading
 from pathlib import Path
+import datetime
 
-from database_manager import initialize_db, fetch_past_runs, clear_db
+from database_manager import (
+    initialize_db,
+    fetch_past_runs,
+    clear_db,
+    fetch_process_runs,
+)
 from contact_form_crawler import ContactFormCrawler
 from centralized_logger import get_logger
 
@@ -439,7 +445,7 @@ def show_past_runs():
         return
 
     # add new column header
-    cols = st.columns((2, 1, 1, 1, 1, 1))  # was (2, 1, 1, 1, 1, 1, 1)
+    cols = st.columns((2, 1, 1, 1, 1, 1))
     headers = [
         "File Processed",
         "Processing Time",
@@ -452,7 +458,7 @@ def show_past_runs():
         col.write(f"**{hdr}**")
 
     for run in past_runs:
-        cols = st.columns((2, 1, 1, 1, 1, 1))  # was (2, 1, 1, 1, 1, 1, 1)
+        cols = st.columns((2, 1, 1, 1, 1, 1))
         cols[0].write(run["filename"])
         cols[1].write(f"{run['processing_time']:.2f}s")
         cols[2].write(f"✔️ {run['reachable_count']}")
@@ -479,8 +485,9 @@ def show_past_runs():
         limit_key = f"limit_{run['id']}"
         if expander_key not in st.session_state:
             st.session_state[expander_key] = False
-        if limit_key not in st.session_state:
-            st.session_state[limit_key] = min(10, run['reachable_count'])
+        # REMOVE this block to avoid the warning:
+        # if limit_key not in st.session_state:
+        #     st.session_state[limit_key] = min(10, run['reachable_count'])
 
         # Always show the expander for each run (no button needed)
         with st.expander(f"Process Reachables for {run['filename']}", expanded=st.session_state[expander_key]):
@@ -509,7 +516,7 @@ def show_past_runs():
                     f"Max domains to process out of {run['reachable_count']}",
                     min_value=1,
                     max_value=max_lim,
-                    value=st.session_state[limit_key],
+                    value=min(10, run['reachable_count']),  # Use default here
                     key=limit_key,
                     on_change=keep_expander_open
                 )
@@ -527,7 +534,6 @@ def show_past_runs():
 
                 contacts = []
                 placeholder = st.empty()
-
                 progress_placeholder = st.empty()
 
                 def on_result(new_url):
@@ -556,6 +562,7 @@ def show_past_runs():
                 )
 
                 async def process_with_live_spinner():
+                    start_time = time.time()  # Track start time
                     df_domains = pd.read_csv(tmp_csv)
                     domains = df_domains["website"].tolist()
                     semaphore = asyncio.Semaphore(5)
@@ -568,25 +575,101 @@ def show_past_runs():
                             for url in contact_urls:
                                 if on_result:
                                     on_result(url)
+                    # After processing, save contacts to CSV in tmp with column name "website"
+                    if contacts:
+                        df_contacts = pd.DataFrame([{"website": c["Contact Url"] if "Contact Url" in c else c.get("contact_url", "")} for c in contacts])
+                        processed_contact_urls_csv_path = Path("tmp") / f"contact_urls_{int(time.time())}.csv"
+                        df_contacts.to_csv(processed_contact_urls_csv_path, index=False)
+                        processing_time = time.time() - start_time
+                        process_success_percent = round((len(contacts) / len(domains)) * 100, 1) if domains else 0
+                        return contacts, processed_contact_urls_csv_path, process_success_percent, processing_time
+                    else:
+                        return contacts, None, 0, time.time() - start_time
 
-                asyncio.run(process_with_live_spinner())
+                # Run the async function and get results
+                contacts, processed_contact_urls_csv_path, process_success_percent, processing_time = asyncio.run(process_with_live_spinner())
 
-                # After processing, save contacts to CSV in tmp with column name "website"
-                if contacts:
-                    df_contacts = pd.DataFrame([{"website": c["Contact Url"] if "Contact Url" in c else c.get("contact_url", "")} for c in contacts])
-                    csv_path = Path("tmp") / f"contact_urls_{int(time.time())}.csv"
-                    df_contacts.to_csv(csv_path, index=False)
-
-                    with open(csv_path, "rb") as f:
+                # Save to database and offer download if contacts found
+                if contacts and processed_contact_urls_csv_path:
+                    from database_manager import save_process_run_to_db
+                    save_process_run_to_db(
+                        original_filename=run["filename"],
+                        reachable_filepath=run["reachable_filepath"],
+                        contact_forms_filepath=str(processed_contact_urls_csv_path),
+                        success_rate=process_success_percent,
+                        processing_time=processing_time
+                    )
+                    st.rerun()
+                    with open(processed_contact_urls_csv_path, "rb") as f:
                         st.download_button(
                             label="⬇️ Download Contact URLs CSV",
                             data=f.read(),
-                            file_name=csv_path.name,
+                            file_name=processed_contact_urls_csv_path.name,
                             use_container_width=True,
                             key=f"download_contacts_{run['id']}"
                         )
                 else:
                     st.info("No contact URLs found to download.")
+    
+    # --- Display Past Process Runs ---
+@st.fragment
+def show_past_process_runs():
+    """Displays a table of past process runs (contact form discovery) with refresh and clear buttons."""
+    st.markdown("---")
+    st.subheader("Past Process Runs")
+
+    process_refresh_btn, process_clear_btn = st.columns(2)
+    with process_refresh_btn:
+        if st.button("🔄 Refresh Process History"):
+            st.rerun(scope="fragment")
+    with process_clear_btn:
+        if st.button("🧹 Clear Process History", on_click=clear_db):
+            st.rerun(scope="fragment")
+
+    process_runs = fetch_process_runs()
+
+    if not process_runs:
+        st.info("No past process runs found. Run a contact form process to see history here.")
+        return
+
+    # Table headers
+    cols = st.columns((2, 2, 2, 1, 1, 2))
+    headers = [
+        "Original File",
+        "Reachable CSV",
+        "Found Forms CSV",
+        "Success Rate (%)",
+        "Time Taken (s)",
+        "Date of Run"
+    ]
+    for col, hdr in zip(cols, headers):
+        col.write(f"**{hdr}**")
+
+    for proc in process_runs:
+        cols = st.columns((2, 2, 2, 1, 1, 2))
+        cols[0].write(proc["original_filename"])
+        with open(proc["reachable_filepath"], "rb") as f:
+            cols[1].download_button(
+                "⬇️",
+                f.read(),
+                file_name=Path(proc["reachable_filepath"]).name,
+                key=f"proc_reachable_{proc['id']}",
+            )
+        with open(proc["contact_forms_filepath"], "rb") as f:
+            cols[2].download_button(
+                "⬇️",
+                f.read(),
+                file_name=Path(proc["contact_forms_filepath"]).name,
+                key=f"proc_forms_{proc['id']}",
+            )
+        cols[3].write(f"{proc['success_rate']:.1f}")
+        cols[4].write(f"{proc['processing_time']:.2f}")
+        # Format timestamp
+        dt = proc["timestamp"]
+        if isinstance(dt, str):
+            dt = datetime.datetime.fromisoformat(dt)
+        cols[5].write(dt.strftime("%Y-%m-%d %H:%M:%S"))
+
 # Add this once, near the top of your file (after imports)
 st.markdown(
     """
@@ -616,3 +699,6 @@ st.markdown(
 
 # --- Display Past Runs ---
 show_past_runs()
+
+# --- Show Past Process Runs ---
+show_past_process_runs()

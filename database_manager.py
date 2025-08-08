@@ -6,9 +6,11 @@ DB_PATH = "verifier.db"
 
 
 def initialize_db():
-    """Initializes the SQLite database and creates the 'runs' table if it doesn't exist."""
+    """Initializes the SQLite database and creates the necessary tables if they don't exist."""
     with sqlite3.connect(DB_PATH) as conn:
         cursor = conn.cursor()
+        
+        # Existing 'runs' table creation
         cursor.execute(
             """
             CREATE TABLE IF NOT EXISTS runs (
@@ -23,6 +25,22 @@ def initialize_db():
             )
             """
         )
+        
+        # New 'process_runs' table for contact form discovery
+        cursor.execute(
+            """
+            CREATE TABLE IF NOT EXISTS process_runs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                original_filename TEXT NOT NULL,
+                reachable_filepath TEXT NOT NULL,
+                contact_forms_filepath TEXT NOT NULL,
+                success_rate REAL NOT NULL,
+                processing_time REAL NOT NULL,
+                timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
+            )
+            """
+        )
+        
         conn.commit()
 
 
@@ -54,6 +72,41 @@ def save_run_to_db(
         conn.commit()
 
 
+def save_process_run_to_db(
+    original_filename,
+    reachable_filepath,
+    contact_forms_filepath,
+    success_rate,
+    processing_time,
+):
+    """Saves the details of a contact form processing run to the database.
+    
+    Args:
+        original_filename (str): Name of the original file uploaded
+        reachable_filepath (str): Path to the CSV with reachable websites
+        contact_forms_filepath (str): Path to the CSV with found contact forms
+        success_rate (float): Percentage of reachable domains with contact forms
+        processing_time (float): Time taken for the whole process in seconds
+    """
+    with sqlite3.connect(DB_PATH) as conn:
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            INSERT INTO process_runs 
+            (original_filename, reachable_filepath, contact_forms_filepath, success_rate, processing_time)
+            VALUES (?, ?, ?, ?, ?)
+            """,
+            (
+                original_filename,
+                str(reachable_filepath),
+                str(contact_forms_filepath),
+                success_rate,
+                processing_time,
+            ),
+        )
+        conn.commit()
+
+
 def fetch_past_runs():
     """Fetches all past verification runs from the database."""
     initialize_db()  # Ensure DB exists when fetching
@@ -64,11 +117,22 @@ def fetch_past_runs():
         return cursor.fetchall()
 
 
+def fetch_process_runs():
+    """Fetches all past contact form processing runs from the database."""
+    initialize_db()  # Ensure DB exists when fetching
+    with sqlite3.connect(DB_PATH) as conn:
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
+        cursor.execute("SELECT * FROM process_runs ORDER BY timestamp DESC")
+        return cursor.fetchall()
+
+
 def clear_db():
     """Clears the database and removes all files from all, reachable, and upload folders."""
     with sqlite3.connect(DB_PATH) as conn:
         cursor = conn.cursor()
         cursor.execute("DELETE FROM runs")
+        cursor.execute("DELETE FROM process_runs")  # Clear the process_runs table too
         conn.commit()
         print("Database cleared")
 

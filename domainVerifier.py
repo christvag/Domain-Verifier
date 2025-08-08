@@ -462,21 +462,37 @@ def show_past_runs():
         cols[2].write(f"✔️ {run['reachable_count']}")
         cols[3].write(f"❌ {run['unreachable_count']}")
 
-        with open(run["reachable_filepath"], "rb") as f:
-            cols[4].download_button(
-                "⬇️",
-                f.read(),
-                file_name=Path(run["reachable_filepath"]).name,
-                key=f"reachable_{run['id']}",
-            )
+        # --- helper to render download + inline view (CSV) ---
+        def _csv_cell(col, file_path: str, dl_key: str, view_key: str, max_rows: int = 200):
+            import pandas as _pd
+            from pathlib import Path as _P
+            cdl, cview = col.columns([1, 1])
+            try:
+                with open(file_path, "rb") as f:
+                    cdl.download_button(
+                        "⬇️",
+                        f.read(),
+                        file_name=_P(file_path).name,
+                        key=dl_key,
+                        use_container_width=True,
+                    )
+            except Exception:
+                cdl.warning("Missing")
+                return
+            # Eye-only popover (no key, no extra label)
+            with cview.popover("👁️", help=_P(file_path).name):
+                try:
+                    df_preview = _pd.read_csv(file_path, nrows=max_rows)
+                    st.caption(f"Preview (first {len(df_preview)} rows)")
+                    st.dataframe(df_preview, use_container_width=True, height=350)
+                except Exception as e:
+                    st.warning(f"Could not preview CSV: {e}")
 
-        with open(run["report_filepath"], "rb") as f:
-            cols[5].download_button(
-                "⬇️",
-                f.read(),
-                file_name=Path(run["report_filepath"]).name,
-                key=f"report_{run['id']}",
-            )
+        # Reachable CSV + inline view
+        _csv_cell(cols[4], run["reachable_filepath"], f"reachable_{run['id']}", f"reachable_view_{run['id']}")
+
+        # Full report CSV + inline view
+        _csv_cell(cols[5], run["report_filepath"], f"report_{run['id']}", f"report_view_{run['id']}")
 
         # --- Persist expander state ---
         expander_key = f"expander_{run['id']}"
@@ -591,7 +607,7 @@ def show_past_runs():
                         metrics_json_filepath=str(metrics_json_path)
                     )
                     # Full rerun so the "Past Process Runs" table updates immediately
-                    st.rerun()
+                    # st.rerun()
                     with open(processed_contact_urls_csv_path, "rb") as f:
                         st.download_button(
                             label="⬇️ Download Contact URLs CSV",
@@ -638,49 +654,88 @@ def show_past_process_runs():
     for col, hdr in zip(cols, headers):
         col.write(f"**{hdr}**")
 
+    # --- helpers for inline view ---
+    def _csv_cell(col, file_path: str, dl_key: str, view_key: str, max_rows: int = 200):
+        import pandas as _pd
+        from pathlib import Path as _P
+        cdl, cview = col.columns([1, 1])
+        try:
+            with open(file_path, "rb") as f:
+                cdl.download_button(
+                    "⬇️",
+                    f.read(),
+                    file_name=_P(file_path).name,
+                    key=dl_key,
+                    use_container_width=True,
+                )
+        except Exception:
+            cdl.warning("Missing")
+            return
+        with cview.popover("👁️", help=_P(file_path).name):
+            try:
+                df_preview = _pd.read_csv(file_path, nrows=max_rows)
+                st.caption(f"Preview (first {len(df_preview)} rows)")
+                st.dataframe(df_preview, use_container_width=True, height=350)
+            except Exception as e:
+                st.warning(f"Could not preview CSV: {e}")
+
+    def _json_cell(col, file_path: str | None, dl_key: str, view_key: str):
+        import json as _json
+        from pathlib import Path as _P
+        cdl, cview = col.columns([1, 1])
+        if not file_path:
+            cdl.write("-")
+            return
+        try:
+            with open(file_path, "rb") as f:
+                cdl.download_button(
+                    "⬇️",
+                    f.read(),
+                    file_name=_P(file_path).name,
+                    key=dl_key,
+                    use_container_width=True,
+                )
+        except Exception:
+            cdl.warning("Missing")
+            return
+        with cview.popover("👁️", help=_P(file_path).name):
+            try:
+                with open(file_path, "r", encoding="utf-8") as jf:
+                    data = _json.load(jf)
+                st.caption("Metrics JSON (collapsible sections below)")
+                if isinstance(data, dict) and "summary" in data:
+                    st.subheader("Summary")
+                    st.json(data["summary"], expanded=False)
+                st.subheader("Full JSON")
+                st.json(data, expanded=False)
+            except Exception as e:
+                st.warning(f"Could not preview JSON: {e}")
+
     for proc in process_runs:
         cols = st.columns((2, 2, 2, 2, 1, 1, 2))
         cols[0].write(proc["original_filename"])
 
-        # Reachable CSV
-        try:
-            with open(proc["reachable_filepath"], "rb") as f:
-                cols[1].download_button(
-                    "⬇️",
-                    f.read(),
-                    file_name=Path(proc["reachable_filepath"]).name,
-                    key=f"proc_reachable_{proc['id']}",
-                )
-        except Exception:
-            cols[1].warning("Missing file")
+        _csv_cell(
+            cols[1],
+            proc["reachable_filepath"],
+            f"proc_reachable_{proc['id']}",
+            f"proc_reachable_view_{proc['id']}",
+        )
+        _csv_cell(
+            cols[2],
+            proc["contact_forms_filepath"],
+            f"proc_forms_{proc['id']}",
+            f"proc_forms_view_{proc['id']}",
+        )
 
-        # Found Forms CSV
-        try:
-            with open(proc["contact_forms_filepath"], "rb") as f:
-                cols[2].download_button(
-                    "⬇️",
-                    f.read(),
-                    file_name=Path(proc["contact_forms_filepath"]).name,
-                    key=f"proc_forms_{proc['id']}",
-                )
-        except Exception:
-            cols[2].warning("Missing file")
-
-        # Metrics JSON
-        metrics_path = proc["metrics_json_filepath"]
-        if metrics_path:
-            try:
-                with open(metrics_path, "rb") as f:
-                    cols[3].download_button(
-                        "⬇️",
-                        f.read(),
-                        file_name=Path(metrics_path).name,
-                        key=f"proc_metrics_{proc['id']}",
-                    )
-            except Exception:
-                cols[3].warning("Missing file")
-        else:
-            cols[3].write("-")
+        # sqlite3.Row -> no .get(); use mapping access safely
+        metrics_path = proc["metrics_json_filepath"] if "metrics_json_filepath" in proc.keys() else None
+        _json_cell(
+            cols[3],
+            metrics_path,
+            f"proc_metrics_{proc['id']}",
+            f"proc_metrics_view_{proc['id']}",
+        )
 
         cols[4].write(f"{proc['success_rate']:.1f}")
         cols[5].write(f"{proc['processing_time']:.2f}")
@@ -690,8 +745,6 @@ def show_past_process_runs():
         try:
             import datetime as _dt
             if isinstance(dt, str):
-                # SQLite default is 'YYYY-MM-DD HH:MM:SS'
-                # fromisoformat handles 'YYYY-MM-DD HH:MM:SS'
                 dt_obj = _dt.datetime.fromisoformat(dt)
             else:
                 dt_obj = _dt.datetime.fromtimestamp(dt)
@@ -699,7 +752,7 @@ def show_past_process_runs():
         except Exception:
             cols[6].write(str(dt))
 
-# Add this once, near the top of your file (after imports)
+# --- Custom Styles for UI ---
 st.markdown(
     """
     <style>
@@ -708,18 +761,93 @@ st.markdown(
     .stDataFrame tbody tr td:first-child {
         display: none;
     }
-    </style>
-    """,
-    unsafe_allow_html=True,
-)
-
-# Add this CSS once after your other st.markdown CSS:
-st.markdown(
-    """
-    <style>
     .all-btn-align {
-        margin-top: 28px !important;  /* Adjust this value as needed for your theme */
+        margin-top: 28px !important;
         width: 100%;
+    }
+    /* Eye-only: hide the chevron/caret that Streamlit adds to popover triggers */
+    [data-testid="stPopoverButton"] svg { display: none !important; }
+    [data-testid="stPopover"] button svg { display: none !important; }
+    /* Icon buttons (download + view) look like compact pills */
+    .stButton > button {
+        padding: 0.35rem 0.55rem !important;
+        border-radius: 10px !important;
+        min-width: 42px; height: 42px;
+        display: inline-flex; align-items: center; justify-content: center;
+        border: 1px solid var(--border-color, rgba(255,255,255,.1));
+        background: var(--secondary-bg, rgba(255,255,255, .04));
+        transition: background 0.15s, border 0.15s;
+    }
+    .stButton > button:hover {
+        background: var(--primary-color, #444) !important;
+        border-color: var(--primary-color, #888) !important;
+    }
+    /* Make the two controls sit closer together */
+    [data-testid="column"] > div:has(.stButton),
+    [data-testid="column"] > div:has([data-testid="stPopoverButton"]) {
+        display: inline-flex; gap: .5rem; align-items: center;
+    }
+    /* Popover panel: wider, scrollable content */
+    [data-testid="stPopoverContent"] {
+        width: min(90vw, 920px) !important;
+        max-height: 70vh !important;
+        overflow: auto !important;
+        padding: 0.5rem 0.75rem !important;
+        border-radius: 12px !important;
+        border: 1px solid var(--border-color, rgba(255,255,255,.1));
+        background: var(--bg-elev, rgba(0,0,0,.6));
+        backdrop-filter: blur(4px);
+    }
+    /* Nice table look for previews */
+    .stMarkdown + .stDataFrame, .stCaption + .stDataFrame {
+        border-radius: 10px; overflow: hidden;
+    }
+    .stDataFrame [data-testid="StyledDataFrame"] {
+        border: 1px solid var(--border-color, rgba(255,255,255,.1));
+        border-radius: 10px;
+    }
+    .stCaption, .stMarkdown caption { opacity: .8; }
+
+    /* --- Custom table styling for summary tables --- */
+    .block-container .stFragment > div > div > div > div > div {
+        /* Target the main table container for Past Runs/Process Runs */
+        border-radius: 14px;
+        overflow: hidden;
+        background: rgba(255,255,255,0.01);
+        box-shadow: 0 2px 12px 0 rgba(0,0,0,0.07);
+    }
+    .stFragment .stColumns {
+        margin-bottom: 0.2rem !important;
+    }
+    .stFragment .stColumn > div {
+        padding: 0.4rem 0.5rem !important;
+        border-radius: 8px;
+        font-size: 1.01rem;
+        background: transparent;
+        transition: background 0.15s;
+    }
+    .stFragment .stColumn > div:hover {
+        background: rgba(255,255,255,0.04);
+    }
+    .stFragment .stColumn > div {
+        border-bottom: 1px solid rgba(255,255,255,0.04);
+    }
+    .stFragment .stColumns:first-child .stColumn > div {
+        font-weight: 700;
+        background: rgba(255,255,255,0.04);
+        color: #fff;
+        border-bottom: 2px solid var(--primary-color, #888);
+        font-size: 1.08rem;
+        letter-spacing: 0.01em;
+    }
+    /* Zebra striping for rows */
+    .stFragment .stColumns:nth-child(even) .stColumn > div {
+        background: rgba(255,255,255,0.015);
+    }
+    /* Reduce vertical spacing between rows */
+    .stFragment .stColumns {
+        margin-top: 0 !important;
+        margin-bottom: 0 !important;
     }
     </style>
     """,

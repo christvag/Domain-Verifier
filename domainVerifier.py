@@ -5,7 +5,6 @@ import pandas as pd
 import asyncio
 import threading
 from pathlib import Path
-import sqlite3  # Make sure this is imported at the top if not already
 import datetime
 
 from database_manager import (

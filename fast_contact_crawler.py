@@ -1,5 +1,6 @@
 import asyncio
 import contextlib
+import json
 import time
 from dataclasses import dataclass, asdict, field
 from pathlib import Path
@@ -7,23 +8,16 @@ from typing import List, Dict, Optional, Tuple
 from urllib.parse import urljoin, urlparse
 
 import pandas as pd
-from bs4 import BeautifulSoup
-
-from centralized_logger import get_logger
-from database_manager import save_process_run_to_db
-
-# Playwright
 from playwright.async_api import async_playwright
 
-BLOCK_RESOURCE_TYPES = {
-    "image", "media", "font", "stylesheet", "xhr", "fetch", "websocket"
-}
+from centralized_logger import get_logger
+
+BLOCK_RESOURCE_TYPES = {"image", "media", "font", "stylesheet", "xhr", "fetch", "websocket"}
 BLOCK_URL_SUBSTRINGS = [
     "googletagmanager", "google-analytics", "doubleclick", "facebook",
     "ads", "adservice", "hotjar", "segment", "optimizely", "mixpanel",
     "youtube", "vimeo", "tiktok", "fonts.googleapis", "gravatar"
 ]
-
 CONTACT_KEYWORDS = [
     "contact", "support", "help", "about", "quote", "inquiry", "enquiry",
     "appointment", "booking", "message", "email", "call", "customer service"
@@ -46,7 +40,6 @@ class DomainMetrics:
     bytes_saved_est: int = 0
     error: Optional[str] = None
 
-
 @dataclass
 class CrawlMetrics:
     run_started_at: float
@@ -67,9 +60,8 @@ class CrawlMetrics:
         d.pop("per_domain", None)
         return d
 
-
 class BrowserPool:
-    def __init__(self, headless: bool = True, contexts: int = 4, pages_per_context: int = 4, default_timeout_ms: int = 12000):
+    def __init__(self, headless: bool = True, contexts: int = 6, pages_per_context: int = 4, default_timeout_ms: int = 12000):
         self.headless = headless
         self.contexts_count = contexts
         self.pages_per_context = pages_per_context
@@ -102,7 +94,6 @@ class BrowserPool:
             ctx.set_default_timeout(self.default_timeout_ms)
             await self._install_blocking(ctx)
             self.contexts.append(ctx)
-            # Fill queue per context pages
             for _ in range(self.pages_per_context):
                 await self.context_queue.put(ctx)
         return self
@@ -134,7 +125,6 @@ class BrowserPool:
             with contextlib.suppress(Exception):
                 await self.playwright.stop()
 
-
 class FastContactCrawler:
     def __init__(self, output_dir: str = "tmp", k_links: int = 3, per_domain_budget_s: int = 30):
         self.output_dir = Path(output_dir)
@@ -145,15 +135,19 @@ class FastContactCrawler:
         self.metrics = CrawlMetrics(run_started_at=time.time())
 
     async def crawl_csv(self, csv_file_path: str, website_col: str = "website", concurrency: int = 100,
-                        headless: bool = True, contexts: int = 6, pages_per_context: int = 4) -> Tuple[str, Dict]:
+                        headless: bool = True, contexts: int = 6, pages_per_context: int = 4) -> Tuple[str, Dict, str]:
         df = pd.read_csv(csv_file_path)
         if website_col not in df.columns:
             raise ValueError(f"CSV must contain column '{website_col}'")
         domains = [self._normalize_domain(d) for d in df[website_col].dropna().tolist()]
+        domains = [d for d in domains if d]
         self.metrics.domains_total = len(domains)
 
-        results_path = self.output_dir / f"contact_urls_{int(time.time())}.csv"
-        detail_path = self.output_dir / f"contact_urls_detail_{int(time.time())}.csv"
+        ts = int(time.time())
+        results_path = self.output_dir / f"contact_urls_{ts}.csv"
+        detail_path = self.output_dir / f"contact_urls_detail_{ts}.csv"
+        metrics_path = self.output_dir / f"contact_urls_metrics_{ts}.json"
+
         results_file = results_path.open("w", encoding="utf-8")
         results_file.write("domain,contact_url,confidence\n")
         detail_records = []
@@ -167,38 +161,42 @@ class FastContactCrawler:
                     self.metrics.per_domain.append(dmetrics)
                     self.metrics.domains_processed += 1
                     self.metrics.forms_total += len(recs)
-                    # stream to csv (reduces memory)
                     for r in recs:
                         results_file.write(f"{domain},{r['contact_url']},{r['confidence']:.3f}\n")
                         detail_records.append(r)
 
             tasks = [asyncio.create_task(worker(d)) for d in domains]
-            for i, t in enumerate(asyncio.as_completed(tasks), 1):
+            for t in asyncio.as_completed(tasks):
                 try:
                     await t
                 except Exception as e:
                     self.logger.error(f"Domain task error: {e}")
 
         results_file.close()
-        # Optional: write detail CSV
         if detail_records:
             pd.DataFrame(detail_records).to_csv(detail_path, index=False)
 
         self.metrics.run_finished_at = time.time()
+        # Save run-level metrics JSON
+        try:
+            with metrics_path.open("w", encoding="utf-8") as mf:
+                json.dump({
+                    "summary": self.metrics.to_flat(),
+                    "per_domain": [asdict(m) for m in self.metrics.per_domain],
+                }, mf, indent=2)
+        except Exception as e:
+            self.logger.error(f"Failed to write metrics JSON: {e}")
 
-        return str(results_path), self.metrics.to_flat()
+        return str(results_path), self.metrics.to_flat(), str(metrics_path)
 
     async def _process_domain(self, pool: BrowserPool, domain: str) -> Tuple[List[Dict], DomainMetrics]:
         started = time.time()
         dmetrics = DomainMetrics(domain=domain, started_at=started)
         ctx = await pool.acquire_context()
+        page = None
         try:
             page = await ctx.new_page()
-            req_counts = {"total": 0, "blocked": 0}
-            bytes_saved_est = 0
 
-            page.on("request", lambda r: self._on_req(r, req_counts))
-            page.on("requestfinished", lambda r: self._on_req_finished(r))
             page.on("console", lambda m: self._on_console(m, dmetrics))
 
             # 1) Home page
@@ -207,11 +205,11 @@ class FastContactCrawler:
             except Exception as e:
                 dmetrics.nav_errors += 1
                 dmetrics.error = f"homepage: {type(e).__name__}"
-                return [], self._finish_metrics(dmetrics, req_counts, bytes_saved_est)
+                return [], self._finish_metrics(dmetrics)
 
             dmetrics.homepage_ms = int((time.time() - started) * 1000)
 
-            # 2) Extract links quickly via JS (no BeautifulSoup needed)
+            # 2) Extract links via JS
             anchors = await page.evaluate("""
                 () => Array.from(document.querySelectorAll('a[href]')).map(a => ({
                     text: (a.innerText || '').trim(),
@@ -235,7 +233,7 @@ class FastContactCrawler:
             dmetrics.candidate_links = len(candidates)
             candidates = candidates[: self.k_links]
 
-            # 4) Visit top-k candidates within per-domain budget
+            # 4) Visit top-k within budget
             deadline = started + self.per_domain_budget_s
             found: List[Dict] = []
             for c in candidates:
@@ -258,10 +256,12 @@ class FastContactCrawler:
                     dmetrics.nav_errors += 1
                     continue
 
-            return found, self._finish_metrics(dmetrics, req_counts, bytes_saved_est)
+            dmetrics.forms_found = len(found)
+            return found, self._finish_metrics(dmetrics)
         finally:
-            with contextlib.suppress(Exception):
-                await page.close()
+            if page:
+                with contextlib.suppress(Exception):
+                    await page.close()
             await pool.release_context(ctx)
 
     def _rank_candidates(self, links: List[Dict]) -> List[Dict]:
@@ -275,14 +275,12 @@ class FastContactCrawler:
                     score += 2
                 if k in url:
                     score += 1
-            # small boost for shorter contact URLs
             score -= min(len(url), 120) / 120.0
             ranked.append((score, l))
         ranked.sort(key=lambda x: x[0], reverse=True)
         return [r[1] for r in ranked]
 
     async def _detect_form(self, page) -> Tuple[bool, Dict]:
-        # Fast DOM-side checks (no soup)
         has_form = await page.evaluate("""
             () => {
                 const forms = Array.from(document.querySelectorAll('form'));
@@ -309,7 +307,6 @@ class FastContactCrawler:
         if has_form and has_form.get("isContact"):
             return True, {"confidence": has_form.get("conf", 0.7), "form_type": "html_form"}
 
-        # Iframe services check
         iframe_hit = await page.evaluate("""
             () => {
                 const ifr = Array.from(document.querySelectorAll('iframe[src]'));
@@ -329,28 +326,16 @@ class FastContactCrawler:
 
         return False, {}
 
-    def _on_req(self, request, counters):
-        counters["total"] += 1
-
-    def _on_req_finished(self, request):
-        pass
-
     def _on_console(self, msg, dmetrics: DomainMetrics):
         if msg.type in ("error", "warning"):
             dmetrics.js_errors += 1
 
-    def _finish_metrics(self, dmetrics: DomainMetrics, req_counts, bytes_saved_est: int) -> DomainMetrics:
+    def _finish_metrics(self, dmetrics: DomainMetrics) -> DomainMetrics:
         dmetrics.finished_at = time.time()
-        dmetrics.total_requests = req_counts["total"]
-        dmetrics.blocked_requests = req_counts["blocked"]
-        dmetrics.bytes_saved_est = bytes_saved_est
         # roll up
-        self.metrics.blocked_requests += dmetrics.blocked_requests
-        self.metrics.total_requests += dmetrics.total_requests
         self.metrics.timeouts += dmetrics.timeouts
         self.metrics.nav_errors += dmetrics.nav_errors
         self.metrics.js_errors += dmetrics.js_errors
-        self.metrics.bytes_saved_est += dmetrics.bytes_saved_est
         return dmetrics
 
     def _normalize_domain(self, d: str) -> str:
@@ -365,10 +350,15 @@ class FastContactCrawler:
         u = urlparse(url)
         return f"{u.scheme}://{u.netloc}"
 
-
 async def crawl_from_csv(csv_file_path: str, website_col: str = "website",
                          output_dir: str = "tmp", concurrency: int = 100,
-                         headless: bool = True) -> Tuple[str, Dict]:
+                         headless: bool = True) -> Tuple[str, Dict, str]:
+    """
+    Returns:
+      - output CSV path
+      - run-level metrics summary dict
+      - metrics JSON filepath
+    """
     crawler = FastContactCrawler(output_dir=output_dir)
     return await crawler.crawl_csv(
         csv_file_path=csv_file_path,

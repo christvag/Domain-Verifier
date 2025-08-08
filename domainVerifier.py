@@ -12,6 +12,7 @@ from database_manager import (
     fetch_past_runs,
     clear_db,
     fetch_process_runs,
+    DB_PATH,  # add this
 )
 from contact_form_crawler import ContactFormCrawler
 from centralized_logger import get_logger
@@ -91,7 +92,7 @@ def check_if_stopped():
     return "PROCESS_STOPPED_BY_USER" in logs
 
 
-def run_verification_in_thread(file_path, retries, column_name):
+def run_verification_in_thread(file_path, num_times, column_name):
     """
     Wrapper function to run the asyncio domain verification in a thread.
     This thread's ONLY job is to do work and set a completion flag.
@@ -106,20 +107,20 @@ def run_verification_in_thread(file_path, retries, column_name):
             from verify_websites import verify_domains
 
             start_time = time.time()
-            reachable_df, _ = loop.run_until_complete(
-                verify_domains(
-                    file_path,
-                    start_time=start_time,
-                    retries=retries,
-                    column=column_name,
-                    logger=logger,
+            for i in range(num_times):
+                print(f"[DEBUG] Verification run {i+1}/{num_times}")
+                reachable_df, _ = loop.run_until_complete(
+                    verify_domains(
+                        file_path,
+                        start_time=start_time,
+                        retries=2,  # Use a fixed, reasonable retry count
+                        column=column_name,
+                        logger=logger,
+                    )
                 )
-            )
             st.session_state.reachable_df = reachable_df
             st.session_state.verification_error = None
-            print(
-                "[DEBUG] Background thread completed successfully. Setting completion flag..."
-            )
+            print("[DEBUG] Background thread completed successfully. Setting completion flag...")
 
             # If contact crawling is enabled, start it now
             if st.session_state.enable_contact_crawling and reachable_df is not None:
@@ -133,7 +134,7 @@ def run_verification_in_thread(file_path, retries, column_name):
         finally:
             st.session_state.verification_complete_flag = True
             st.session_state.completion_timestamp = time.time()
-            completion_file.touch()  # Create file signal
+            completion_file.touch()
             print(
                 f"[DEBUG] Background thread finished. Completion flag set at {st.session_state.completion_timestamp}"
             )
@@ -422,8 +423,6 @@ else:
     # Initial state
     st.markdown("---")
     st.info("Start a process to see live updates.")
-
-
 # --- Display Past Runs ---
 @st.fragment
 def show_past_runs():
@@ -565,7 +564,7 @@ def show_past_runs():
                 async def process_with_live_spinner():
                     start_time = time.time()
                     # Use high-concurrency fast crawler
-                    output_csv, run_metrics = await crawl_from_csv(
+                    output_csv, run_metrics, metrics_json_path = await crawl_from_csv(
                         csv_file_path=str(tmp_csv),
                         website_col="website",
                         output_dir="tmp",
@@ -575,13 +574,16 @@ def show_past_runs():
                     # Build contacts for your live table from the output CSV
                     df_contacts = pd.read_csv(output_csv)
                     contacts = [{"contact_url": url, "confidence": 0.7} for url in df_contacts["contact_url"].tolist()]
-                    process_success_percent = round((len(contacts) / len(pd.read_csv(tmp_csv))) * 100, 1) if len(df_contacts) else 0
+                    # Success rate = unique domains with a found form / total domains processed in this run
+                    total_domains = len(pd.read_csv(tmp_csv))
+                    unique_domains_found = df_contacts["domain"].nunique() if not df_contacts.empty and "domain" in df_contacts.columns else (1 if len(df_contacts) else 0)
+                    process_success_percent = round((unique_domains_found / total_domains) * 100, 1) if total_domains else 0
                     processing_time = time.time() - start_time
                     processed_contact_urls_csv_path = Path(output_csv)
-                    return contacts, processed_contact_urls_csv_path, process_success_percent, processing_time
+                    return contacts, processed_contact_urls_csv_path, process_success_percent, processing_time, Path(metrics_json_path)
 
                 # Run the async function and get results
-                contacts, processed_contact_urls_csv_path, process_success_percent, processing_time = asyncio.run(process_with_live_spinner())
+                contacts, processed_contact_urls_csv_path, process_success_percent, processing_time, metrics_json_path = asyncio.run(process_with_live_spinner())
 
                 # Save to database and offer download if contacts found
                 if contacts and processed_contact_urls_csv_path:
@@ -591,8 +593,10 @@ def show_past_runs():
                         reachable_filepath=run["reachable_filepath"],
                         contact_forms_filepath=str(processed_contact_urls_csv_path),
                         success_rate=process_success_percent,
-                        processing_time=processing_time
+                        processing_time=processing_time,
+                        metrics_json_filepath=str(metrics_json_path)
                     )
+                    # Full rerun so the "Past Process Runs" table updates immediately
                     st.rerun()
                     with open(processed_contact_urls_csv_path, "rb") as f:
                         st.download_button(
@@ -604,8 +608,8 @@ def show_past_runs():
                         )
                 else:
                     st.info("No contact URLs found to download.")
-    
-    # --- Display Past Process Runs ---
+
+# --- Display Past Process Runs ---
 @st.fragment
 def show_past_process_runs():
     """Displays a table of past process runs (contact form discovery) with refresh and clear buttons."""
@@ -615,10 +619,10 @@ def show_past_process_runs():
     process_refresh_btn, process_clear_btn = st.columns(2)
     with process_refresh_btn:
         if st.button("🔄 Refresh Process History"):
-            st.rerun(scope="fragment")
+            st.rerun()  # full rerun; fragment-only refresh is not supported
     with process_clear_btn:
         if st.button("🧹 Clear Process History", on_click=clear_db):
-            st.rerun(scope="fragment")
+            st.rerun()
 
     process_runs = fetch_process_runs()
 
@@ -626,12 +630,13 @@ def show_past_process_runs():
         st.info("No past process runs found. Run a contact form process to see history here.")
         return
 
-    # Table headers
-    cols = st.columns((2, 2, 2, 1, 1, 2))
+    # Table headers (added Metrics JSON)
+    cols = st.columns((2, 2, 2, 2, 1, 1, 2))
     headers = [
         "Original File",
         "Reachable CSV",
         "Found Forms CSV",
+        "Metrics JSON",
         "Success Rate (%)",
         "Time Taken (s)",
         "Date of Run"
@@ -640,29 +645,65 @@ def show_past_process_runs():
         col.write(f"**{hdr}**")
 
     for proc in process_runs:
-        cols = st.columns((2, 2, 2, 1, 1, 2))
+        cols = st.columns((2, 2, 2, 2, 1, 1, 2))
         cols[0].write(proc["original_filename"])
-        with open(proc["reachable_filepath"], "rb") as f:
-            cols[1].download_button(
-                "⬇️",
-                f.read(),
-                file_name=Path(proc["reachable_filepath"]).name,
-                key=f"proc_reachable_{proc['id']}",
-            )
-        with open(proc["contact_forms_filepath"], "rb") as f:
-            cols[2].download_button(
-                "⬇️",
-                f.read(),
-                file_name=Path(proc["contact_forms_filepath"]).name,
-                key=f"proc_forms_{proc['id']}",
-            )
-        cols[3].write(f"{proc['success_rate']:.1f}")
-        cols[4].write(f"{proc['processing_time']:.2f}")
-        # Format timestamp
+
+        # Reachable CSV
+        try:
+            with open(proc["reachable_filepath"], "rb") as f:
+                cols[1].download_button(
+                    "⬇️",
+                    f.read(),
+                    file_name=Path(proc["reachable_filepath"]).name,
+                    key=f"proc_reachable_{proc['id']}",
+                )
+        except Exception:
+            cols[1].warning("Missing file")
+
+        # Found Forms CSV
+        try:
+            with open(proc["contact_forms_filepath"], "rb") as f:
+                cols[2].download_button(
+                    "⬇️",
+                    f.read(),
+                    file_name=Path(proc["contact_forms_filepath"]).name,
+                    key=f"proc_forms_{proc['id']}",
+                )
+        except Exception:
+            cols[2].warning("Missing file")
+
+        # Metrics JSON
+        metrics_path = proc["metrics_json_filepath"]
+        if metrics_path:
+            try:
+                with open(metrics_path, "rb") as f:
+                    cols[3].download_button(
+                        "⬇️",
+                        f.read(),
+                        file_name=Path(metrics_path).name,
+                        key=f"proc_metrics_{proc['id']}",
+                    )
+            except Exception:
+                cols[3].warning("Missing file")
+        else:
+            cols[3].write("-")
+
+        cols[4].write(f"{proc['success_rate']:.1f}")
+        cols[5].write(f"{proc['processing_time']:.2f}")
+
+        # Date of Run
         dt = proc["timestamp"]
-        if isinstance(dt, str):
-            dt = datetime.datetime.fromisoformat(dt)
-        cols[5].write(dt.strftime("%Y-%m-%d %H:%M:%S"))
+        try:
+            import datetime as _dt
+            if isinstance(dt, str):
+                # SQLite default is 'YYYY-MM-DD HH:MM:SS'
+                # fromisoformat handles 'YYYY-MM-DD HH:MM:SS'
+                dt_obj = _dt.datetime.fromisoformat(dt)
+            else:
+                dt_obj = _dt.datetime.fromtimestamp(dt)
+            cols[6].write(dt_obj.strftime("%Y-%m-%d %H:%M:%S"))
+        except Exception:
+            cols[6].write(str(dt))
 
 # Add this once, near the top of your file (after imports)
 st.markdown(

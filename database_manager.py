@@ -7,11 +7,11 @@ DB_PATH = "verifier.db"
 
 def initialize_db():
     """Initializes the SQLite database and creates the necessary tables if they don't exist."""
+    Path(DB_PATH).touch(exist_ok=True)
     with sqlite3.connect(DB_PATH) as conn:
-        cursor = conn.cursor()
-        
-        # Existing 'runs' table creation
-        cursor.execute(
+        cur = conn.cursor()
+        # Verification runs
+        cur.execute(
             """
             CREATE TABLE IF NOT EXISTS runs (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -21,13 +21,24 @@ def initialize_db():
                 unreachable_count INTEGER NOT NULL,
                 reachable_filepath TEXT NOT NULL,
                 report_filepath TEXT NOT NULL,
+                completion_timestamp REAL,
+                was_stopped_flag INTEGER,
                 timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
             )
             """
         )
-        
-        # New 'process_runs' table for contact form discovery
-        cursor.execute(
+        # Try to add missing columns if table already exists
+        try:
+            cur.execute("ALTER TABLE runs ADD COLUMN completion_timestamp REAL")
+        except Exception:
+            pass
+        try:
+            cur.execute("ALTER TABLE runs ADD COLUMN was_stopped_flag INTEGER")
+        except Exception:
+            pass
+
+        # Process runs (contact discovery)
+        cur.execute(
             """
             CREATE TABLE IF NOT EXISTS process_runs (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -36,11 +47,15 @@ def initialize_db():
                 contact_forms_filepath TEXT NOT NULL,
                 success_rate REAL NOT NULL,
                 processing_time REAL NOT NULL,
+                metrics_json_filepath TEXT,
                 timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
             )
             """
         )
-        
+        try:
+            cur.execute("ALTER TABLE process_runs ADD COLUMN metrics_json_filepath TEXT")
+        except Exception:
+            pass
         conn.commit()
 
 
@@ -54,30 +69,24 @@ def save_run_to_db(
 ):
     """Saves the details of a verification run to the database."""
     with sqlite3.connect(DB_PATH) as conn:
-        cursor = conn.cursor()
-        cursor.execute(
+        cur = conn.cursor()
+        cur.execute(
             """
             INSERT INTO runs (filename, processing_time, reachable_count, unreachable_count, reachable_filepath, report_filepath)
             VALUES (?, ?, ?, ?, ?, ?)
             """,
-            (
-                filename,
-                processing_time,
-                reachable_count,
-                unreachable_count,
-                str(reachable_filepath),
-                str(report_filepath),
-            ),
+            (filename, processing_time, reachable_count, unreachable_count, str(reachable_filepath), str(report_filepath)),
         )
         conn.commit()
 
 
 def save_process_run_to_db(
-    original_filename,
-    reachable_filepath,
-    contact_forms_filepath,
-    success_rate,
-    processing_time,
+    original_filename: str,
+    reachable_filepath: str,
+    contact_forms_filepath: str,
+    success_rate: float,
+    processing_time: float,
+    metrics_json_filepath: str | None = None,
 ):
     """Saves the details of a contact form processing run to the database.
     
@@ -89,19 +98,19 @@ def save_process_run_to_db(
         processing_time (float): Time taken for the whole process in seconds
     """
     with sqlite3.connect(DB_PATH) as conn:
-        cursor = conn.cursor()
-        cursor.execute(
+        cur = conn.cursor()
+        cur.execute(
             """
-            INSERT INTO process_runs 
-            (original_filename, reachable_filepath, contact_forms_filepath, success_rate, processing_time)
-            VALUES (?, ?, ?, ?, ?)
+            INSERT INTO process_runs (original_filename, reachable_filepath, contact_forms_filepath, success_rate, processing_time, metrics_json_filepath)
+            VALUES (?, ?, ?, ?, ?, ?)
             """,
             (
                 original_filename,
                 str(reachable_filepath),
                 str(contact_forms_filepath),
-                success_rate,
-                processing_time,
+                float(success_rate),
+                float(processing_time),
+                str(metrics_json_filepath) if metrics_json_filepath else None,
             ),
         )
         conn.commit()
@@ -112,9 +121,9 @@ def fetch_past_runs():
     initialize_db()  # Ensure DB exists when fetching
     with sqlite3.connect(DB_PATH) as conn:
         conn.row_factory = sqlite3.Row
-        cursor = conn.cursor()
-        cursor.execute("SELECT * FROM runs ORDER BY timestamp DESC")
-        return cursor.fetchall()
+        cur = conn.cursor()
+        cur.execute("SELECT * FROM runs ORDER BY timestamp DESC")
+        return cur.fetchall()
 
 
 def fetch_process_runs():
@@ -122,17 +131,17 @@ def fetch_process_runs():
     initialize_db()  # Ensure DB exists when fetching
     with sqlite3.connect(DB_PATH) as conn:
         conn.row_factory = sqlite3.Row
-        cursor = conn.cursor()
-        cursor.execute("SELECT * FROM process_runs ORDER BY timestamp DESC")
-        return cursor.fetchall()
+        cur = conn.cursor()
+        cur.execute("SELECT * FROM process_runs ORDER BY timestamp DESC")
+        return cur.fetchall()
 
 
 def clear_db():
     """Clears the database and removes all files from all, reachable, and upload folders."""
     with sqlite3.connect(DB_PATH) as conn:
-        cursor = conn.cursor()
-        cursor.execute("DELETE FROM runs")
-        cursor.execute("DELETE FROM process_runs")  # Clear the process_runs table too
+        cur = conn.cursor()
+        cur.execute("DELETE FROM runs")
+        cur.execute("DELETE FROM process_runs")
         conn.commit()
         print("Database cleared")
 

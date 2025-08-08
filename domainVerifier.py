@@ -439,7 +439,7 @@ def show_past_runs():
         return
 
     # add new column header
-    cols = st.columns((2, 1, 1, 1, 1, 1))  # was (2, 1, 1, 1, 1, 1, 1)
+    cols = st.columns((2, 1, 1, 1, 1, 1))
     headers = [
         "File Processed",
         "Processing Time",
@@ -452,7 +452,7 @@ def show_past_runs():
         col.write(f"**{hdr}**")
 
     for run in past_runs:
-        cols = st.columns((2, 1, 1, 1, 1, 1))  # was (2, 1, 1, 1, 1, 1, 1)
+        cols = st.columns((2, 1, 1, 1, 1, 1))
         cols[0].write(run["filename"])
         cols[1].write(f"{run['processing_time']:.2f}s")
         cols[2].write(f"✔️ {run['reachable_count']}")
@@ -479,8 +479,9 @@ def show_past_runs():
         limit_key = f"limit_{run['id']}"
         if expander_key not in st.session_state:
             st.session_state[expander_key] = False
-        if limit_key not in st.session_state:
-            st.session_state[limit_key] = min(10, run['reachable_count'])
+        # REMOVE this block to avoid the warning:
+        # if limit_key not in st.session_state:
+        #     st.session_state[limit_key] = min(10, run['reachable_count'])
 
         # Always show the expander for each run (no button needed)
         with st.expander(f"Process Reachables for {run['filename']}", expanded=st.session_state[expander_key]):
@@ -509,7 +510,7 @@ def show_past_runs():
                     f"Max domains to process out of {run['reachable_count']}",
                     min_value=1,
                     max_value=max_lim,
-                    value=st.session_state[limit_key],
+                    value=min(10, run['reachable_count']),  # Use default here
                     key=limit_key,
                     on_change=keep_expander_open
                 )
@@ -527,7 +528,6 @@ def show_past_runs():
 
                 contacts = []
                 placeholder = st.empty()
-
                 progress_placeholder = st.empty()
 
                 def on_result(new_url):
@@ -556,6 +556,7 @@ def show_past_runs():
                 )
 
                 async def process_with_live_spinner():
+                    start_time = time.time()  # Track start time
                     df_domains = pd.read_csv(tmp_csv)
                     domains = df_domains["website"].tolist()
                     semaphore = asyncio.Semaphore(5)
@@ -568,20 +569,36 @@ def show_past_runs():
                             for url in contact_urls:
                                 if on_result:
                                     on_result(url)
+                    # After processing, save contacts to CSV in tmp with column name "website"
+                    if contacts:
+                        df_contacts = pd.DataFrame([{"website": c["Contact Url"] if "Contact Url" in c else c.get("contact_url", "")} for c in contacts])
+                        processed_contact_urls_csv_path = Path("tmp") / f"contact_urls_{int(time.time())}.csv"
+                        df_contacts.to_csv(processed_contact_urls_csv_path, index=False)
+                        processing_time = time.time() - start_time
+                        process_success_percent = round((len(contacts) / len(domains)) * 100, 1) if domains else 0
+                        return contacts, processed_contact_urls_csv_path, process_success_percent, processing_time
+                    else:
+                        return contacts, None, 0, time.time() - start_time
 
-                asyncio.run(process_with_live_spinner())
+                # Run the async function and get results
+                contacts, processed_contact_urls_csv_path, process_success_percent, processing_time = asyncio.run(process_with_live_spinner())
 
-                # After processing, save contacts to CSV in tmp with column name "website"
-                if contacts:
-                    df_contacts = pd.DataFrame([{"website": c["Contact Url"] if "Contact Url" in c else c.get("contact_url", "")} for c in contacts])
-                    csv_path = Path("tmp") / f"contact_urls_{int(time.time())}.csv"
-                    df_contacts.to_csv(csv_path, index=False)
+                # Save to database and offer download if contacts found
+                if contacts and processed_contact_urls_csv_path:
+                    from database_manager import save_process_run_to_db
+                    save_process_run_to_db(
+                        original_filename=run["filename"],
+                        reachable_filepath=run["reachable_filepath"],
+                        contact_forms_filepath=str(processed_contact_urls_csv_path),
+                        success_rate=process_success_percent,
+                        processing_time=processing_time
+                    )
 
-                    with open(csv_path, "rb") as f:
+                    with open(processed_contact_urls_csv_path, "rb") as f:
                         st.download_button(
                             label="⬇️ Download Contact URLs CSV",
                             data=f.read(),
-                            file_name=csv_path.name,
+                            file_name=processed_contact_urls_csv_path.name,
                             use_container_width=True,
                             key=f"download_contacts_{run['id']}"
                         )

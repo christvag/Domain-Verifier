@@ -15,6 +15,7 @@ from database_manager import (
 )
 from contact_form_crawler import ContactFormCrawler
 from centralized_logger import get_logger
+from fast_contact_crawler import crawl_from_csv
 
 # --- Page and State Setup ---
 st.set_page_config(page_title="Domain Verifier", layout="centered")
@@ -562,29 +563,22 @@ def show_past_runs():
                 )
 
                 async def process_with_live_spinner():
-                    start_time = time.time()  # Track start time
-                    df_domains = pd.read_csv(tmp_csv)
-                    domains = df_domains["website"].tolist()
-                    semaphore = asyncio.Semaphore(5)
-                    for i, domain in enumerate(domains, 1):
-                        domain = domain.strip()
-                        if not domain:
-                            continue
-                        with st.spinner(f"Processing | {domain}"):
-                            contact_urls = await crawler._crawl_single_domain(domain)
-                            for url in contact_urls:
-                                if on_result:
-                                    on_result(url)
-                    # After processing, save contacts to CSV in tmp with column name "website"
-                    if contacts:
-                        df_contacts = pd.DataFrame([{"website": c["Contact Url"] if "Contact Url" in c else c.get("contact_url", "")} for c in contacts])
-                        processed_contact_urls_csv_path = Path("tmp") / f"contact_urls_{int(time.time())}.csv"
-                        df_contacts.to_csv(processed_contact_urls_csv_path, index=False)
-                        processing_time = time.time() - start_time
-                        process_success_percent = round((len(contacts) / len(domains)) * 100, 1) if domains else 0
-                        return contacts, processed_contact_urls_csv_path, process_success_percent, processing_time
-                    else:
-                        return contacts, None, 0, time.time() - start_time
+                    start_time = time.time()
+                    # Use high-concurrency fast crawler
+                    output_csv, run_metrics = await crawl_from_csv(
+                        csv_file_path=str(tmp_csv),
+                        website_col="website",
+                        output_dir="tmp",
+                        concurrency=100,     # tune: 50–200 depending on machine/network
+                        headless=True,       # set False for debugging
+                    )
+                    # Build contacts for your live table from the output CSV
+                    df_contacts = pd.read_csv(output_csv)
+                    contacts = [{"contact_url": url, "confidence": 0.7} for url in df_contacts["contact_url"].tolist()]
+                    process_success_percent = round((len(contacts) / len(pd.read_csv(tmp_csv))) * 100, 1) if len(df_contacts) else 0
+                    processing_time = time.time() - start_time
+                    processed_contact_urls_csv_path = Path(output_csv)
+                    return contacts, processed_contact_urls_csv_path, process_success_percent, processing_time
 
                 # Run the async function and get results
                 contacts, processed_contact_urls_csv_path, process_success_percent, processing_time = asyncio.run(process_with_live_spinner())

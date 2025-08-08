@@ -4,7 +4,7 @@ import json
 import time
 from dataclasses import dataclass, asdict, field
 from pathlib import Path
-from typing import List, Dict, Optional, Tuple
+from typing import List, Dict, Optional, Tuple, Callable, Any
 from urllib.parse import urljoin, urlparse
 
 import pandas as pd
@@ -134,8 +134,17 @@ class FastContactCrawler:
         self.logger = get_logger()
         self.metrics = CrawlMetrics(run_started_at=time.time())
 
-    async def crawl_csv(self, csv_file_path: str, website_col: str = "website", concurrency: int = 100,
-                        headless: bool = True, contexts: int = 6, pages_per_context: int = 4) -> Tuple[str, Dict, str]:
+    async def crawl_csv(
+        self,
+        csv_file_path: str,
+        website_col: str = "website",
+        concurrency: int = 100,
+        headless: bool = True,
+        contexts: int = 6,
+        pages_per_context: int = 4,
+        on_contact: Optional[Callable[[Dict[str, Any]], Any]] = None,
+        on_progress: Optional[Callable[[int, int, str], Any]] = None,
+    ) -> Tuple[str, Dict, str]:
         df = pd.read_csv(csv_file_path)
         if website_col not in df.columns:
             raise ValueError(f"CSV must contain column '{website_col}'")
@@ -150,20 +159,46 @@ class FastContactCrawler:
 
         results_file = results_path.open("w", encoding="utf-8")
         results_file.write("domain,contact_url,confidence\n")
-        detail_records = []
+        detail_records: List[Dict] = []
 
         sem = asyncio.Semaphore(concurrency)
+        io_lock = asyncio.Lock()
+        count_lock = asyncio.Lock()
+        processed_count = 0
+
+        async def _maybe_call(cb, *args, **kwargs):
+            if not cb:
+                return
+            try:
+                res = cb(*args, **kwargs)
+                if asyncio.iscoroutine(res):
+                    await res
+            except Exception as e:
+                self.logger.error(f"Progress callback error: {e}")
 
         async with BrowserPool(headless=headless, contexts=contexts, pages_per_context=pages_per_context) as pool:
             async def worker(domain: str):
+                nonlocal processed_count
                 async with sem:
                     recs, dmetrics = await self._process_domain(pool, domain)
                     self.metrics.per_domain.append(dmetrics)
                     self.metrics.domains_processed += 1
                     self.metrics.forms_total += len(recs)
-                    for r in recs:
-                        results_file.write(f"{domain},{r['contact_url']},{r['confidence']:.3f}\n")
-                        detail_records.append(r)
+
+                    # Write and stream out each found contact
+                    if recs:
+                        async with io_lock:
+                            for r in recs:
+                                results_file.write(f"{domain},{r['contact_url']},{r['confidence']:.3f}\n")
+                                detail_records.append(r)
+                        for r in recs:
+                            await _maybe_call(on_contact, r)
+
+                    # Progress per-domain
+                    async with count_lock:
+                        processed_count += 1
+                        cur = processed_count
+                    await _maybe_call(on_progress, cur, self.metrics.domains_total, domain)
 
             tasks = [asyncio.create_task(worker(d)) for d in domains]
             for t in asyncio.as_completed(tasks):
@@ -350,9 +385,15 @@ class FastContactCrawler:
         u = urlparse(url)
         return f"{u.scheme}://{u.netloc}"
 
-async def crawl_from_csv(csv_file_path: str, website_col: str = "website",
-                         output_dir: str = "tmp", concurrency: int = 100,
-                         headless: bool = True) -> Tuple[str, Dict, str]:
+async def crawl_from_csv(
+    csv_file_path: str,
+    website_col: str = "website",
+    output_dir: str = "tmp",
+    concurrency: int = 100,
+    headless: bool = True,
+    on_contact: Optional[Callable[[Dict[str, Any]], Any]] = None,
+    on_progress: Optional[Callable[[int, int, str], Any]] = None,
+) -> Tuple[str, Dict, str]:
     """
     Returns:
       - output CSV path
@@ -367,4 +408,6 @@ async def crawl_from_csv(csv_file_path: str, website_col: str = "website",
         headless=headless,
         contexts=6,
         pages_per_context=4,
+        on_contact=on_contact,
+        on_progress=on_progress,
     )

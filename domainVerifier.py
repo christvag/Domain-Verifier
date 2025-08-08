@@ -107,17 +107,15 @@ def run_verification_in_thread(file_path, num_times, column_name):
             from verify_websites import verify_domains
 
             start_time = time.time()
-            for i in range(num_times):
-                print(f"[DEBUG] Verification run {i+1}/{num_times}")
-                reachable_df, _ = loop.run_until_complete(
-                    verify_domains(
-                        file_path,
-                        start_time=start_time,
-                        retries=2,  # Use a fixed, reasonable retry count
-                        column=column_name,
-                        logger=logger,
-                    )
+            reachable_df, _ = loop.run_until_complete(
+                verify_domains(
+                    file_path,
+                    start_time=start_time,
+                    retries=num_times,
+                    column=column_name,
+                    logger=logger,
                 )
+            )
             st.session_state.reachable_df = reachable_df
             st.session_state.verification_error = None
             print("[DEBUG] Background thread completed successfully. Setting completion flag...")
@@ -536,53 +534,49 @@ def show_past_runs():
                 placeholder = st.empty()
                 progress_placeholder = st.empty()
 
-                def on_result(new_url):
-                    contacts.append(new_url)
-                    st.session_state[f"contacts_{run['id']}"] = contacts.copy()
-                    processed = len(contacts)
-                    total = run['reachable_count']
-                    percent = round(float((processed / total) * 100),1)
-                    progress_placeholder.progress(
-                        processed / total,
-                        text=f"Found {processed} out of {total} Reachable Domains ({percent}%)"
-                    )
-                    # Prepare DataFrame for display
+                # Build live UI callbacks
+                # Stream a row as it's found
+                def on_contact_cb(row: dict):
+                    contacts.append({
+                        "contact_url": row.get("contact_url"),
+                        "confidence": row.get("confidence", 0.7),
+                    })
                     df_live = pd.DataFrame(contacts)
                     if not df_live.empty:
                         df_live = df_live.reset_index(drop=True)
                         df_live.insert(0, "#", range(1, len(df_live) + 1))
-                        df_live = df_live[["#", "contact_url", "confidence"]]
-                        df_live = df_live.rename(columns={"contact_url": "Contact Url", "confidence": "Confidence"})
-                        df_live = df_live.set_index("#")
+                        df_live = df_live[["#", "contact_url", "confidence"]].set_index("#")
                     placeholder.table(df_live)
 
-                crawler = ContactFormCrawler(
-                    csv_file_path=str(tmp_csv),
-                    output_dir="tmp"
-                )
+                # Update progress when a domain finishes
+                def on_progress_cb(processed: int, total: int, last_domain: str):
+                    percent = round((processed / max(total, 1)) * 100, 1)
+                    progress_placeholder.progress(
+                        processed / max(total, 1),
+                        text=f"Processed {processed}/{total} domains ({percent}%) • Last: {last_domain}"
+                    )
 
                 async def process_with_live_spinner():
                     start_time = time.time()
-                    # Use high-concurrency fast crawler
                     output_csv, run_metrics, metrics_json_path = await crawl_from_csv(
                         csv_file_path=str(tmp_csv),
                         website_col="website",
                         output_dir="tmp",
-                        concurrency=100,     # tune: 50–200 depending on machine/network
-                        headless=True,       # set False for debugging
+                        concurrency=100,
+                        headless=True,
+                        on_contact=on_contact_cb,
+                        on_progress=on_progress_cb,
                     )
-                    # Build contacts for your live table from the output CSV
-                    df_contacts = pd.read_csv(output_csv)
-                    contacts = [{"contact_url": url, "confidence": 0.7} for url in df_contacts["contact_url"].tolist()]
-                    # Success rate = unique domains with a found form / total domains processed in this run
+                    # Compute summary after run completes
+                    df_contacts = pd.read_csv(output_csv) if Path(output_csv).exists() else pd.DataFrame(columns=["domain","contact_url","confidence"])
                     total_domains = len(pd.read_csv(tmp_csv))
-                    unique_domains_found = df_contacts["domain"].nunique() if not df_contacts.empty and "domain" in df_contacts.columns else (1 if len(df_contacts) else 0)
+                    unique_domains_found = df_contacts["domain"].nunique() if not df_contacts.empty and "domain" in df_contacts.columns else 0
                     process_success_percent = round((unique_domains_found / total_domains) * 100, 1) if total_domains else 0
                     processing_time = time.time() - start_time
                     processed_contact_urls_csv_path = Path(output_csv)
                     return contacts, processed_contact_urls_csv_path, process_success_percent, processing_time, Path(metrics_json_path)
 
-                # Run the async function and get results
+                # Run and get results (UI has been updating during the crawl)
                 contacts, processed_contact_urls_csv_path, process_success_percent, processing_time, metrics_json_path = asyncio.run(process_with_live_spinner())
 
                 # Save to database and offer download if contacts found

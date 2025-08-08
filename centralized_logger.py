@@ -92,6 +92,18 @@ class _CentralLogger:
         with self._lock:
             self._logs.append(msg)
 
+    def info(self, msg: str):
+        """Log an informational message"""
+        self.log(f"[INFO] {msg}")
+
+    def warning(self, msg: str):
+        """Log a warning message"""
+        self.log(f"[WARNING] {msg}")
+
+    def error(self, msg: str):
+        """Log an error message"""
+        self.log(f"[ERROR] {msg}")
+
     def progress(self, stage: str, percent: int):
         """
         Log a progress update with structured context.
